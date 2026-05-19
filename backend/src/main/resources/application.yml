@@ -1,0 +1,36 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: kbd-pm-system-backend
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:kbd_pm_system}?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:baiyu@2025}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+  jackson:
+    time-zone: UTC
+
+jwt:
+  secret: ${JWT_SECRET:mySecretKeyForJwtTokenGeneration}
+  expiration: ${JWT_EXPIRATION:86400000}
+
+logging:
+  level:
+    org.hibernate.SQL: debug
+    org.springframework.security: info
+    # 减少框架内部 DEBUG 日志刷屏
+    org.springframework.web: warn
+    org.springframework.boot: warn
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} : %msg%n"
+
