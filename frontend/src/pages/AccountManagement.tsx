@@ -7,7 +7,7 @@ import { Badge } from '../components/ui/badge';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 import { toast } from 'sonner';
-import { UserPlus, Key, Shield, ShieldCheck, ArrowLeft, Save, X } from 'lucide-react';
+import { UserPlus, Key, Shield, ShieldCheck, ArrowLeft, Save, X, Building2, UserCog } from 'lucide-react';
 
 interface UserInfo {
   id: number;
@@ -15,6 +15,8 @@ interface UserInfo {
   email: string;
   isActive: boolean;
   roles: string[];
+  departmentId?: number;
+  departmentName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -32,21 +34,40 @@ interface PermissionInfo {
   description: string;
 }
 
+interface DepartmentInfo {
+  id: number;
+  deptCode: string;
+  deptName: string;
+  deptType: string;
+  parentId?: number;
+  isActive: boolean;
+  headUserId?: number;
+  headUserName?: string;
+  memberCount: number;
+}
+
 const AccountManagement: React.FC = () => {
   const navigate = useNavigate();
-  const { user, hasRole, hasPermission } = useAuth();
+  const { user, hasRole } = useAuth();
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [roles, setRoles] = useState<RoleInfo[]>([]);
   const [permissions, setPermissions] = useState<PermissionInfo[]>([]);
+  const [departments, setDepartments] = useState<DepartmentInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'users' | 'roles'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'roles' | 'departments'>('users');
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState<{ userId: number; username: string } | null>(null);
   const [showRoleModal, setShowRoleModal] = useState<{ userId: number; username: string; currentRoles: string[] } | null>(null);
   const [showPermissionModal, setShowPermissionModal] = useState<RoleInfo | null>(null);
+  const [showDeptDetail, setShowDeptDetail] = useState<DepartmentInfo | null>(null);
+  const [deptMembers, setDeptMembers] = useState<UserInfo[]>([]);
+  const [loadingDeptMembers, setLoadingDeptMembers] = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [availableUsers, setAvailableUsers] = useState<UserInfo[]>([]);
+  const [selectedAddUserId, setSelectedAddUserId] = useState<number | undefined>(undefined);
 
   // 表单状态
-  const [newUser, setNewUser] = useState({ username: '', password: '', email: '', roles: [] as string[] });
+  const [newUser, setNewUser] = useState({ username: '', password: '', email: '', roles: [] as string[], departmentId: undefined as number | undefined });
   const [newPassword, setNewPassword] = useState('');
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
@@ -60,14 +81,16 @@ const AccountManagement: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [usersRes, rolesRes, permsRes] = await Promise.all([
+      const [usersRes, rolesRes, permsRes, deptRes] = await Promise.all([
         api.get('/api/users'),
         api.get('/api/users/roles'),
         api.get('/api/users/permissions'),
+        api.get('/api/departments'),
       ]);
       setUsers(usersRes.data.data || []);
       setRoles(rolesRes.data.data || []);
       setPermissions(permsRes.data.data || []);
+      setDepartments(deptRes.data.data || []);
     } catch (error) {
       toast.error('加载数据失败');
       console.error('Load data error:', error);
@@ -85,7 +108,7 @@ const AccountManagement: React.FC = () => {
       await api.post('/api/users', newUser);
       toast.success('用户创建成功');
       setShowCreateUser(false);
-      setNewUser({ username: '', password: '', email: '', roles: [] });
+      setNewUser({ username: '', password: '', email: '', roles: [], departmentId: undefined });
       loadData();
     } catch (error: any) {
       toast.error(error.response?.data?.message || '创建用户失败');
@@ -139,6 +162,85 @@ const AccountManagement: React.FC = () => {
   const openPermissionModal = (r: RoleInfo) => {
     setSelectedPermissions(r.permissions.map(p => p.name));
     setShowPermissionModal(r);
+  };
+
+  const openDeptDetail = async (dept: DepartmentInfo) => {
+    setShowDeptDetail(dept);
+    setLoadingDeptMembers(true);
+    try {
+      const res = await api.get(`/api/departments/${dept.id}/members`);
+      setDeptMembers(res.data.data || []);
+    } catch (error) {
+      toast.error('加载部门成员失败');
+      setDeptMembers([]);
+    } finally {
+      setLoadingDeptMembers(false);
+    }
+  };
+
+  const handleAssignHead = async (deptId: number, userId: number | null) => {
+    try {
+      await api.put(`/api/departments/${deptId}/head`, { userId });
+      toast.success(userId ? '部门负责人设置成功' : '已取消部门负责人');
+      loadData();
+      // 刷新当前部门详情
+      if (showDeptDetail && showDeptDetail.id === deptId) {
+        const res = await api.get(`/api/departments/${deptId}/members`);
+        setDeptMembers(res.data.data || []);
+        // 更新部门信息
+        const deptRes = await api.get(`/api/departments/${deptId}`);
+        setShowDeptDetail(deptRes.data.data);
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || '设置部门负责人失败');
+    }
+  };
+
+  const handleAddMember = async () => {
+    if (!showDeptDetail || !selectedAddUserId) return;
+    try {
+      await api.put(`/api/departments/${showDeptDetail.id}/members`, { userId: selectedAddUserId });
+      toast.success('成员添加成功');
+      setShowAddMember(false);
+      setSelectedAddUserId(undefined);
+      // 刷新成员列表
+      const res = await api.get(`/api/departments/${showDeptDetail.id}/members`);
+      setDeptMembers(res.data.data || []);
+      // 刷新部门信息
+      const deptRes = await api.get(`/api/departments/${showDeptDetail.id}`);
+      setShowDeptDetail(deptRes.data.data);
+      loadData();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || '添加成员失败');
+    }
+  };
+
+  const handleRemoveMember = async (userId: number) => {
+    if (!showDeptDetail) return;
+    if (!window.confirm('确定要将该成员移出部门吗？')) return;
+    try {
+      await api.delete(`/api/departments/${showDeptDetail.id}/members/${userId}`);
+      toast.success('成员已移出部门');
+      // 刷新成员列表
+      const res = await api.get(`/api/departments/${showDeptDetail.id}/members`);
+      setDeptMembers(res.data.data || []);
+      // 刷新部门信息
+      const deptRes = await api.get(`/api/departments/${showDeptDetail.id}`);
+      setShowDeptDetail(deptRes.data.data);
+      loadData();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || '移出成员失败');
+    }
+  };
+
+  const openAddMember = () => {
+    if (!showDeptDetail) return;
+    // 过滤出不在当前部门的用户
+    const memberIds = new Set(deptMembers.map(m => m.id));
+    const available = users.filter(u => !memberIds.has(u.id));
+    setAvailableUsers(available);
+    setSelectedAddUserId(undefined);
+    setShowAddMember(true);
   };
 
   if (loading) {
@@ -216,6 +318,14 @@ const AccountManagement: React.FC = () => {
               用户管理
             </Button>
             <Button
+              variant={activeTab === 'departments' ? 'default' : 'outline'}
+              onClick={() => setActiveTab('departments')}
+              className={activeTab === 'departments' ? 'bg-blue-600' : 'border-slate-600 text-slate-300'}
+            >
+              <Building2 className="w-4 h-4 mr-2" />
+              部门管理
+            </Button>
+            <Button
               variant={activeTab === 'roles' ? 'default' : 'outline'}
               onClick={() => setActiveTab('roles')}
               className={activeTab === 'roles' ? 'bg-blue-600' : 'border-slate-600 text-slate-300'}
@@ -246,6 +356,7 @@ const AccountManagement: React.FC = () => {
                       <th className="text-left p-4">用户名</th>
                       <th className="text-left p-4">邮箱</th>
                       <th className="text-left p-4">角色</th>
+                      <th className="text-left p-4">所属部门</th>
                       <th className="text-left p-4">状态</th>
                       <th className="text-right p-4">操作</th>
                     </tr>
@@ -264,6 +375,9 @@ const AccountManagement: React.FC = () => {
                               </Badge>
                             ))}
                           </div>
+                        </td>
+                        <td className="p-4 text-sm text-slate-400">
+                          {u.departmentName || '-'}
                         </td>
                         <td className="p-4">
                           <Badge variant="outline" className={u.isActive ? 'bg-green-900/30 text-green-300 border-green-700' : 'bg-red-900/30 text-red-300 border-red-700'}>
@@ -298,6 +412,55 @@ const AccountManagement: React.FC = () => {
                 </table>
               </CardContent>
             </Card>
+          </div>
+        )}
+
+        {/* 部门管理面板 */}
+        {activeTab === 'departments' && isAdmin && (
+          <div>
+            <h2 className="text-xl font-semibold mb-4">部门管理</h2>
+            <div className="grid gap-4">
+              {departments.map(dept => (
+                <Card key={dept.id} className="bg-slate-800 border-slate-600">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="text-slate-100 text-lg flex items-center gap-2">
+                          <Building2 className="w-5 h-5 text-blue-400" />
+                          {dept.deptName}
+                        </CardTitle>
+                        <p className="text-sm text-slate-400 mt-1">
+                          编码: {dept.deptCode} | 类型: {dept.deptType}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openDeptDetail(dept)}
+                        className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                      >
+                        <UserCog className="w-4 h-4 mr-1" />
+                        查看成员
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex gap-6 text-sm">
+                      <div>
+                        <span className="text-slate-400">成员数: </span>
+                        <span className="text-slate-200 font-medium">{dept.memberCount}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">负责人: </span>
+                        <span className="text-slate-200 font-medium">
+                          {dept.headUserName || <span className="text-slate-500">未设置</span>}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </div>
         )}
 
@@ -442,6 +605,19 @@ const AccountManagement: React.FC = () => {
                   ))}
                 </div>
               </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">所属部门</label>
+                <select
+                  value={newUser.departmentId || ''}
+                  onChange={e => setNewUser({ ...newUser, departmentId: e.target.value ? Number(e.target.value) : undefined })}
+                  className="w-full bg-slate-700 border border-slate-600 text-white rounded px-3 py-2 text-sm"
+                >
+                  <option value="">无部门</option>
+                  {departments.map(dept => (
+                    <option key={dept.id} value={dept.id}>{dept.deptName}</option>
+                  ))}
+                </select>
+              </div>
               <Button onClick={handleCreateUser} className="w-full bg-blue-600 hover:bg-blue-700">
                 <Save className="w-4 h-4 mr-2" />
                 创建
@@ -566,6 +742,175 @@ const AccountManagement: React.FC = () => {
               <Button onClick={handleUpdatePermissions} className="w-full bg-blue-600 hover:bg-blue-700 mt-4">
                 <Save className="w-4 h-4 mr-2" />
                 保存权限设置
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 部门详情弹窗 */}
+      {showDeptDetail && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-2xl border border-slate-600 max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-blue-400" />
+                <h3 className="text-lg font-semibold">{showDeptDetail.deptName}</h3>
+                <Badge variant="outline" className="bg-slate-700 text-slate-300 border-slate-600 ml-2">
+                  {showDeptDetail.deptCode}
+                </Badge>
+              </div>
+              <button onClick={() => setShowDeptDetail(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* 部门信息 */}
+            <div className="bg-slate-700/50 rounded p-3 mb-4 text-sm">
+              <div className="flex gap-6">
+                <div>
+                  <span className="text-slate-400">类型: </span>
+                  <span className="text-slate-200">{showDeptDetail.deptType}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400">成员数: </span>
+                  <span className="text-slate-200 font-medium">{showDeptDetail.memberCount}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400">负责人: </span>
+                  <span className="text-slate-200 font-medium">
+                    {showDeptDetail.headUserName || <span className="text-slate-500">未设置</span>}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 成员列表 */}
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-md font-semibold">部门成员</h4>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={openAddMember}
+                className="border-green-700 text-green-300 hover:bg-green-900/30 text-xs"
+              >
+                <UserPlus className="w-3 h-3 mr-1" />
+                添加成员
+              </Button>
+            </div>
+            {loadingDeptMembers ? (
+              <div className="text-center text-slate-400 py-8">加载中...</div>
+            ) : deptMembers.length === 0 ? (
+              <div className="text-center text-slate-500 py-8">该部门暂无成员</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-700 text-slate-400">
+                    <th className="text-left p-2">用户名</th>
+                    <th className="text-left p-2">邮箱</th>
+                    <th className="text-left p-2">角色</th>
+                    <th className="text-right p-2">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deptMembers.map(member => (
+                    <tr key={member.id} className="border-b border-slate-700 hover:bg-slate-700/50">
+                      <td className="p-2 font-medium">
+                        {member.username}
+                        {showDeptDetail.headUserId === member.id && (
+                          <Badge variant="outline" className="ml-2 bg-yellow-900/30 text-yellow-300 border-yellow-700 text-xs">
+                            负责人
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="p-2 text-slate-400">{member.email || '-'}</td>
+                      <td className="p-2">
+                        <div className="flex flex-wrap gap-1">
+                          {member.roles.map(role => (
+                            <Badge key={role} variant="outline" className="bg-purple-900/30 text-purple-300 border-purple-700 text-xs">
+                              {role.replace('ROLE_', '')}
+                            </Badge>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="p-2 text-right">
+                        <div className="flex gap-1 justify-end">
+                          {showDeptDetail.headUserId === member.id ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleAssignHead(showDeptDetail.id, null)}
+                              className="border-red-700 text-red-300 hover:bg-red-900/30 text-xs"
+                            >
+                              取消负责人
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleAssignHead(showDeptDetail.id, member.id)}
+                              className="border-slate-600 text-slate-300 hover:bg-slate-700 text-xs"
+                            >
+                              设为负责人
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleRemoveMember(member.id)}
+                            className="border-red-800 text-red-400 hover:bg-red-900/20 text-xs"
+                          >
+                            <X className="w-3 h-3" />
+                            移出
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 添加成员弹窗 */}
+      {showAddMember && showDeptDetail && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-600">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">添加成员 - {showDeptDetail.deptName}</h3>
+              <button onClick={() => { setShowAddMember(false); setSelectedAddUserId(undefined); }} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">选择用户</label>
+                {availableUsers.length === 0 ? (
+                  <p className="text-slate-500 text-sm py-4 text-center">所有用户都已加入该部门</p>
+                ) : (
+                  <select
+                    value={selectedAddUserId || ''}
+                    onChange={e => setSelectedAddUserId(e.target.value ? Number(e.target.value) : undefined)}
+                    className="w-full bg-slate-700 border border-slate-600 text-white rounded px-3 py-2 text-sm"
+                  >
+                    <option value="">请选择用户</option>
+                    {availableUsers.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.username} {u.email ? `(${u.email})` : ''} - {u.roles.map(r => r.replace('ROLE_', '')).join(', ')}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <Button
+                onClick={handleAddMember}
+                disabled={!selectedAddUserId}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+              >
+                <UserPlus className="w-4 h-4 mr-2" />
+                确认添加
               </Button>
             </div>
           </div>

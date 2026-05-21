@@ -7,6 +7,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.authentication.LockedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -37,6 +41,27 @@ public class GlobalExceptionHandler {
   @ExceptionHandler(BudgetExceededException.class)
   public ResponseEntity<Result<Void>> handleBudgetExceeded(BudgetExceededException ex) {
     return ResponseEntity.status(423).body(Result.fail(423, ex.getMessage()));
+  }
+
+  @ExceptionHandler(BadCredentialsException.class)
+  public ResponseEntity<Result<Void>> handleBadCredentials(BadCredentialsException ex) {
+    log.warn("登录失败：用户名或密码错误 - {}", ex.getMessage());
+    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+        .body(Result.fail(401, "用户名或密码错误"));
+  }
+
+  @ExceptionHandler(DisabledException.class)
+  public ResponseEntity<Result<Void>> handleDisabled(DisabledException ex) {
+    log.warn("登录失败：账号已被禁用");
+    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+        .body(Result.fail(401, "账号已被禁用，请联系管理员"));
+  }
+
+  @ExceptionHandler(AuthenticationException.class)
+  public ResponseEntity<Result<Void>> handleAuthentication(AuthenticationException ex) {
+    log.warn("登录失败：认证异常 - {}", ex.getMessage());
+    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+        .body(Result.fail(401, "用户名或密码错误"));
   }
 
   @ExceptionHandler(Exception.class)

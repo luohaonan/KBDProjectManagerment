@@ -23,6 +23,9 @@ public class OrgDepartmentEntity {
   @Column(name = "parent_id")
   private Long parentId;
 
+  @Column(name = "head_user_id")
+  private Long headUserId;
+
   @Column(name = "is_active", nullable = false)
   private Boolean isActive = Boolean.TRUE;
 
@@ -43,9 +46,12 @@ public class OrgDepartmentEntity {
   public void setDeptType(Enums.DepartmentType deptType) { this.deptType = deptType; }
   public Long getParentId() { return parentId; }
   public void setParentId(Long parentId) { this.parentId = parentId; }
+  public Long getHeadUserId() { return headUserId; }
+  public void setHeadUserId(Long headUserId) { this.headUserId = headUserId; }
   public Boolean getIsActive() { return isActive; }
   public void setIsActive(Boolean active) { isActive = active; }
   public Instant getCreatedAt() { return createdAt; }
   public Instant getUpdatedAt() { return updatedAt; }
+  public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 }
 

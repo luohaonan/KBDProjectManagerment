@@ -168,6 +168,7 @@ public class ProjectService {
     project.setPlannedPccDate(request.plannedPccDate());
     project.setPlannedIndDate(request.plannedIndDate());
     project.setPlannedNdaDate(request.plannedNdaDate());
+    project.setPlannedEndDate(request.plannedEndDate());
     project.setBudgetToPcc(request.budgetToPcc());
     project.setRiskScientific(request.riskScientific());
     project.setRiskCompetitive(request.riskCompetitive());
@@ -240,6 +241,7 @@ public class ProjectService {
     project.setPlannedPccDate(request.plannedPccDate());
     project.setPlannedIndDate(request.plannedIndDate());
     project.setPlannedNdaDate(request.plannedNdaDate());
+    project.setPlannedEndDate(request.plannedEndDate());
     project.setBudgetToPcc(request.budgetToPcc());
     project.setRiskScientific(request.riskScientific());
     project.setRiskCompetitive(request.riskCompetitive());
@@ -350,6 +352,7 @@ public class ProjectService {
         project.getPlannedPccDate(),
         project.getPlannedIndDate(),
         project.getPlannedNdaDate(),
+        project.getPlannedEndDate(),
         project.getBudgetToPcc(),
         project.getRiskScientific(),
         project.getRiskCompetitive(),
@@ -490,6 +493,7 @@ public class ProjectService {
         project.getPlannedPccDate(),
         project.getPlannedIndDate(),
         project.getPlannedNdaDate(),
+        project.getPlannedEndDate(),
         project.getBudgetToPcc(),
         project.getRiskScientific(),
         project.getRiskCompetitive(),

@@ -395,13 +395,26 @@ public class MilestoneService {
   public List<MilestoneResponse> getProjectMilestones(long projectId) {
     List<ProjectMilestoneEntity> milestones = projectMilestoneRepository.findByProjectIdOrderByIdAsc(projectId);
 
+    // 获取项目实体，用于读取项目级别的计划日期
+    ProjectEntity project = projectRepository.findById(projectId).orElse(null);
+
     return milestones.stream().map(m -> {
       Long mid = m.getMilestoneId();
       MilestoneDefEntity def = milestoneDefRepository.findById(mid).orElse(null);
       if (def == null) return null;
 
-      LocalDate plannedDate = m.getPlannedDate() != null
-          ? m.getPlannedDate() : null;
+      // 优先使用里程碑级别的计划日期，如果为空则从项目级别获取对应阶段的计划日期
+      LocalDate plannedDate = m.getPlannedDate();
+      if (plannedDate == null && project != null) {
+        String milestoneCode = def.getMilestoneCode();
+        plannedDate = switch (milestoneCode) {
+          case "G0" -> project.getPlannedPccDate();
+          case "G5" -> project.getPlannedIndDate();
+          case "G9" -> project.getPlannedNdaDate();
+          default -> null;
+        };
+      }
+
       LocalDate actualDate = m.getActualDate() != null
           ? m.getActualDate() : null;
 

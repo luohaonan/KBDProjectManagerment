@@ -1,9 +1,11 @@
 package com.kbd.pms.web;
 
 import com.kbd.pms.dto.UserDto;
+import com.kbd.pms.entity.OrgDepartmentEntity;
 import com.kbd.pms.entity.Permission;
 import com.kbd.pms.entity.Role;
 import com.kbd.pms.entity.User;
+import com.kbd.pms.repository.OrgDepartmentRepository;
 import com.kbd.pms.repository.PermissionRepository;
 import com.kbd.pms.repository.RoleRepository;
 import com.kbd.pms.repository.UserRepository;
@@ -32,6 +34,9 @@ public class UserController {
 
     @Autowired
     private PermissionRepository permissionRepository;
+
+    @Autowired
+    private OrgDepartmentRepository orgDepartmentRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -71,6 +76,13 @@ public class UserController {
                 roles.add(role);
             }
             user.setRoles(roles);
+        }
+
+        // 设置部门
+        if (request.getDepartmentId() != null) {
+            OrgDepartmentEntity dept = orgDepartmentRepository.findById(request.getDepartmentId())
+                    .orElseThrow(() -> new ApiException(400, "部门不存在"));
+            user.setDepartment(dept);
         }
 
         user = userRepository.save(user);
@@ -229,6 +241,10 @@ public class UserController {
                 .map(Permission::getName)
                 .distinct()
                 .collect(Collectors.toList()));
+        if (user.getDepartment() != null) {
+            info.setDepartmentId(user.getDepartment().getId());
+            info.setDepartmentName(user.getDepartment().getDeptName());
+        }
 
         return ResponseEntity.ok(Result.ok(info));
     }
@@ -240,6 +256,7 @@ public class UserController {
         private String password;
         private String email;
         private List<String> roles;
+        private Long departmentId;
 
         public String getUsername() { return username; }
         public void setUsername(String username) { this.username = username; }
@@ -249,6 +266,8 @@ public class UserController {
         public void setEmail(String email) { this.email = email; }
         public List<String> getRoles() { return roles; }
         public void setRoles(List<String> roles) { this.roles = roles; }
+        public Long getDepartmentId() { return departmentId; }
+        public void setDepartmentId(Long departmentId) { this.departmentId = departmentId; }
     }
 
     public static class UpdatePasswordRequest {
@@ -307,6 +326,8 @@ public class UserController {
         private String email;
         private List<String> roles;
         private List<String> permissions;
+        private Long departmentId;
+        private String departmentName;
 
         public Long getId() { return id; }
         public void setId(Long id) { this.id = id; }
@@ -318,5 +339,9 @@ public class UserController {
         public void setRoles(List<String> roles) { this.roles = roles; }
         public List<String> getPermissions() { return permissions; }
         public void setPermissions(List<String> permissions) { this.permissions = permissions; }
+        public Long getDepartmentId() { return departmentId; }
+        public void setDepartmentId(Long departmentId) { this.departmentId = departmentId; }
+        public String getDepartmentName() { return departmentName; }
+        public void setDepartmentName(String departmentName) { this.departmentName = departmentName; }
     }
 }

@@ -125,6 +125,9 @@ public class ProjectEntity {
   @Column(name = "planned_nda_date")
   private LocalDate plannedNdaDate;
 
+  @Column(name = "planned_end_date")
+  private LocalDate plannedEndDate;
+
   @Column(name = "budget_to_pcc", precision = 18, scale = 2)
   private BigDecimal budgetToPcc;
 
@@ -225,6 +228,8 @@ public class ProjectEntity {
   public void setPlannedIndDate(LocalDate plannedIndDate) { this.plannedIndDate = plannedIndDate; }
   public LocalDate getPlannedNdaDate() { return plannedNdaDate; }
   public void setPlannedNdaDate(LocalDate plannedNdaDate) { this.plannedNdaDate = plannedNdaDate; }
+  public LocalDate getPlannedEndDate() { return plannedEndDate; }
+  public void setPlannedEndDate(LocalDate plannedEndDate) { this.plannedEndDate = plannedEndDate; }
   public BigDecimal getBudgetToPcc() { return budgetToPcc; }
   public void setBudgetToPcc(BigDecimal budgetToPcc) { this.budgetToPcc = budgetToPcc; }
   public String getRiskScientific() { return riskScientific; }

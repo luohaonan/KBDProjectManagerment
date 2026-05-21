@@ -4,7 +4,6 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Textarea } from './ui/textarea';
 import { FileUp, CheckCircle, AlertCircle, Save, Send, ThumbsUp, ThumbsDown, History, Loader2, FileText } from 'lucide-react';
-import { HasPermission } from './HasPermission';
 import api from '../lib/api';
 import { toast } from 'sonner';
 
@@ -139,12 +138,18 @@ const statusBadgeMap: Record<string, { label: string; color: string }> = {
   SUBMITTED: { label: '评审中', color: 'bg-blue-600' },
   APPROVED: { label: '已通过', color: 'bg-green-600' },
   REJECTED: { label: '未通过', color: 'bg-red-600' },
+  GO: { label: '通过 (Go)', color: 'bg-green-600' },
+  CONDITIONAL_GO: { label: '有条件通过', color: 'bg-yellow-600' },
+  NO_GO: { label: '不通过', color: 'bg-red-600' },
 };
 
 const reviewStatusMap: Record<string, { label: string; color: string }> = {
   PENDING: { label: '待评审', color: 'bg-yellow-600' },
   APPROVED: { label: '已通过', color: 'bg-green-600' },
   REJECTED: { label: '未通过', color: 'bg-red-600' },
+  GO: { label: '通过 (Go)', color: 'bg-green-600' },
+  CONDITIONAL_GO: { label: '有条件通过', color: 'bg-yellow-600' },
+  NO_GO: { label: '不通过', color: 'bg-red-600' },
 };
 
 export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
@@ -168,9 +173,6 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
   const [savingDraft, setSavingDraft] = useState(false);
   const [decisionLoading, setDecisionLoading] = useState<number | null>(null);
   const [decisionOpinion, setDecisionOpinion] = useState('');
-  const [showDecisionDialog, setShowDecisionDialog] = useState<{ taskId: number; decision: string } | null>(null);
-
-  const isPmc = currentUserRoles.includes('ROLE_PMC');
   const isPm = currentUserRoles.includes('ROLE_PM');
 
   // 加载评审数据
@@ -302,7 +304,6 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
       const result = res.data as { code: number; message?: string };
       if (result.code === 200 || result.code === 0) {
         toast.success(decision === 'APPROVED' ? '已通过' : '已驳回');
-        setShowDecisionDialog(null);
         setDecisionOpinion('');
         loadReviews();
         loadRecords();
@@ -319,7 +320,6 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
   // 获取当前活跃的评审（最近提交的）
   const activeReview = reviews.length > 0 ? reviews[0] : null;
   const isUnderReview = activeReview?.status === 'SUBMITTED';
-  const isDraft = activeReview?.status === 'DRAFT';
   const isApproved = activeReview?.status === 'APPROVED';
   const isRejected = activeReview?.status === 'REJECTED';
 
@@ -509,42 +509,53 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
             )}
           </div>
 
-          {/* PMC 审批操作 */}
+          {/* 评审操作卡片 - 仅在用户有当前里程碑阶段的评审任务时可见 */}
           {myPendingTask && (
             <div className="mt-4 p-4 bg-slate-700 rounded border border-slate-600">
-              <h4 className="text-slate-100 font-semibold mb-3">审批操作</h4>
+              <h4 className="text-slate-100 font-semibold mb-3">评审操作</h4>
               <div className="mb-3">
                 <label className="block text-sm font-medium text-slate-300 mb-2">
-                  审批意见
+                  评审意见
                 </label>
                 <Textarea
                   value={decisionOpinion}
                   onChange={(e) => setDecisionOpinion(e.target.value)}
-                  placeholder="请输入审批意见..."
+                  placeholder="请输入评审意见..."
                   className="bg-slate-600 border-slate-500 text-slate-100 min-h-[80px]"
                 />
               </div>
               <div className="flex gap-3">
                 <Button
-                  onClick={() => handleDecision(myPendingTask.id, 'APPROVED')}
+                  onClick={() => handleDecision(myPendingTask.id, 'GO')}
                   disabled={decisionLoading === myPendingTask.id}
                   className="flex-1 bg-green-600 hover:bg-green-700 text-white"
                 >
                   {decisionLoading === myPendingTask.id ? (
                     <><Loader2 className="w-4 h-4 mr-2 animate-spin" />处理中...</>
                   ) : (
-                    <><ThumbsUp className="w-4 h-4 mr-2" />评审通过</>
+                    <><ThumbsUp className="w-4 h-4 mr-2" />通过 (Go)</>
                   )}
                 </Button>
                 <Button
-                  onClick={() => handleDecision(myPendingTask.id, 'REJECTED')}
+                  onClick={() => handleDecision(myPendingTask.id, 'CONDITIONAL_GO')}
+                  disabled={decisionLoading === myPendingTask.id}
+                  className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white"
+                >
+                  {decisionLoading === myPendingTask.id ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />处理中...</>
+                  ) : (
+                    <><AlertCircle className="w-4 h-4 mr-2" />有条件通过 (Conditional Go)</>
+                  )}
+                </Button>
+                <Button
+                  onClick={() => handleDecision(myPendingTask.id, 'NO_GO')}
                   disabled={decisionLoading === myPendingTask.id}
                   className="flex-1 bg-red-600 hover:bg-red-700 text-white"
                 >
                   {decisionLoading === myPendingTask.id ? (
                     <><Loader2 className="w-4 h-4 mr-2 animate-spin" />处理中...</>
                   ) : (
-                    <><ThumbsDown className="w-4 h-4 mr-2" />评审未通过</>
+                    <><ThumbsDown className="w-4 h-4 mr-2" />不通过 (No Go)</>
                   )}
                 </Button>
               </div>
@@ -601,11 +612,14 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
                               {task.status === 'PENDING' && (
                                 <Badge className="bg-yellow-600 text-white text-xs">待审批</Badge>
                               )}
-                              {task.status === 'APPROVED' && (
-                                <Badge className="bg-green-600 text-white text-xs">已通过</Badge>
+                              {(task.status === 'APPROVED' || task.decision === 'GO') && (
+                                <Badge className="bg-green-600 text-white text-xs">通过 (Go)</Badge>
                               )}
-                              {task.status === 'REJECTED' && (
-                                <Badge className="bg-red-600 text-white text-xs">未通过</Badge>
+                              {task.decision === 'CONDITIONAL_GO' && (
+                                <Badge className="bg-yellow-600 text-white text-xs">有条件通过</Badge>
+                              )}
+                              {(task.status === 'REJECTED' || task.decision === 'NO_GO') && (
+                                <Badge className="bg-red-600 text-white text-xs">不通过</Badge>
                               )}
                               {task.decidedAt && (
                                 <span className="text-slate-500 text-xs">
@@ -656,18 +670,21 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
                       </span>
                     </div>
                     <Badge className={
-                      record.result === 'APPROVED' ? 'bg-green-600 text-white text-xs' :
-                      record.result === 'REJECTED' ? 'bg-red-600 text-white text-xs' :
+                      record.result === 'GO' || record.result === 'APPROVED' ? 'bg-green-600 text-white text-xs' :
+                      record.result === 'CONDITIONAL_GO' ? 'bg-yellow-600 text-white text-xs' :
+                      record.result === 'NO_GO' || record.result === 'REJECTED' ? 'bg-red-600 text-white text-xs' :
                       'bg-blue-600 text-white text-xs'
                     }>
-                      {record.result === 'APPROVED' ? '通过' :
-                       record.result === 'REJECTED' ? '驳回' : record.result}
+                      {record.result === 'GO' || record.result === 'APPROVED' ? '通过 (Go)' :
+                       record.result === 'CONDITIONAL_GO' ? '有条件通过' :
+                       record.result === 'NO_GO' || record.result === 'REJECTED' ? '不通过' : record.result}
                     </Badge>
                   </div>
                   <p className="text-slate-400 text-xs">
                     操作: {record.action === 'SUBMIT' ? '提交评审' :
-                           record.action === 'APPROVE' ? '审批通过' :
-                           record.action === 'REJECT' ? '审批驳回' :
+                           record.action === 'APPROVE' || record.action === 'GO' ? '评审通过 (Go)' :
+                           record.action === 'CONDITIONAL_GO' ? '有条件通过' :
+                           record.action === 'REJECT' || record.action === 'NO_GO' ? '评审不通过' :
                            record.action === 'DRAFT' ? '保存草稿' : record.action}
                   </p>
                   {record.opinion && (

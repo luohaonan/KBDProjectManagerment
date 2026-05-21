@@ -7,7 +7,6 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { ProjectInitiationForm } from '../components/ProjectInitiationForm';
 import { MilestoneConsole } from '../components/MilestoneConsole';
 import { DocumentList } from '../components/DocumentList';
 import { BudgetTracker } from '../components/BudgetTracker';
@@ -41,6 +40,7 @@ interface ProjectData {
   plannedPccDate: string | null;
   plannedIndDate: string | null;
   plannedNdaDate: string | null;
+  plannedEndDate: string | null;
   budgetToPcc: number | null;
   riskScientific: string | null;
   riskCompetitive: string | null;
@@ -100,6 +100,7 @@ const ProjectDetail: React.FC = () => {
     plannedPccDate: '',
     plannedIndDate: '',
     plannedNdaDate: '',
+    plannedEndDate: '',
     budgetToPcc: 0,
     riskScientific: '',
     riskCompetitive: '',
@@ -151,6 +152,7 @@ const ProjectDetail: React.FC = () => {
       plannedPccDate: project.plannedPccDate || '',
       plannedIndDate: project.plannedIndDate || '',
       plannedNdaDate: project.plannedNdaDate || '',
+      plannedEndDate: project.plannedEndDate || '',
       // 数据库存储单位为元，编辑表单单位为万元，需转换
       budgetToPcc: project.budgetToPcc ? project.budgetToPcc / 10000 : 0,
       riskScientific: project.riskScientific || '',
@@ -205,6 +207,7 @@ const ProjectDetail: React.FC = () => {
         plannedPccDate: editForm.plannedPccDate || null,
         plannedIndDate: editForm.plannedIndDate || null,
         plannedNdaDate: editForm.plannedNdaDate || null,
+        plannedEndDate: editForm.plannedEndDate || null,
         budgetToPcc: budgetToPccInYuan,
         riskScientific: editForm.riskScientific || null,
         riskCompetitive: editForm.riskCompetitive || null,
@@ -356,13 +359,6 @@ const ProjectDetail: React.FC = () => {
             概览
           </TabsTrigger>
           <TabsTrigger
-            value="initiation"
-            className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-300"
-          >
-            <FileText className="w-4 h-4 mr-2" />
-            立项表单
-          </TabsTrigger>
-          <TabsTrigger
             value="milestone"
             className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-300"
           >
@@ -498,31 +494,6 @@ const ProjectDetail: React.FC = () => {
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
-
-        {/* 立项表单标签 */}
-        <TabsContent value="initiation">
-          <ProjectInitiationForm
-            projectId={project.projectCode}
-            initialData={{
-              targetPath: project.targetPathway || '',
-              mechanism: project.mechanism || '',
-              indication: project.indication || '',
-              unmetNeeds: project.unmetNeeds || '',
-              scientificBasis: project.scientificBasis || '',
-              expectedIndication: project.expectedIndication || '',
-              administrationRoute: project.administrationRoute || '',
-              dosageForm: project.dosageForm || '',
-              dosageFrequency: project.dosageFrequency || '',
-              efficacyTarget: project.efficacyTarget || '',
-              safetyAdvantage: project.safetyAdvantage || '',
-              differentiation: project.differentiation || '',
-            }}
-            onSubmit={(data) => {
-              console.log('提交立项表单：', data);
-              alert('立项表单已提交！');
-            }}
-          />
         </TabsContent>
 
         {/* 里程碑控制台标签 */}
@@ -919,6 +890,18 @@ const ProjectDetail: React.FC = () => {
                       type="date"
                       name="plannedNdaDate"
                       value={editForm.plannedNdaDate}
+                      onChange={handleEditChange}
+                      className="bg-slate-700 border-slate-600 text-slate-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      预估项目结束日期
+                    </label>
+                    <Input
+                      type="date"
+                      name="plannedEndDate"
+                      value={editForm.plannedEndDate}
                       onChange={handleEditChange}
                       className="bg-slate-700 border-slate-600 text-slate-100"
                     />

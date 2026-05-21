@@ -10,6 +10,7 @@ import CreateProject from './pages/CreateProject';
 import Timeline from './pages/Timeline';
 import Login from './pages/Login';
 import AccountManagement from './pages/AccountManagement';
+import ReviewCenter from './pages/ReviewCenter';
 import { Button } from './components/ui/button';
 
 const AppContent: React.FC = () => {
@@ -82,6 +83,14 @@ const AppContent: React.FC = () => {
           element={
             <ProtectedRoute>
               <CreateProject />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/review-center"
+          element={
+            <ProtectedRoute>
+              <ReviewCenter />
             </ProtectedRoute>
           }
         />

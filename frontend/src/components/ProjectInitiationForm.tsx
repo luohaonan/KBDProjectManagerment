@@ -29,7 +29,6 @@ interface ProjectInitiationFormProps {
 export const ProjectInitiationForm: React.FC<ProjectInitiationFormProps> = ({
   projectId,
   initialData,
-  onSubmit,
 }) => {
   const [formData, setFormData] = useState<FormData>({
     targetPath: initialData?.targetPath || '',
@@ -52,13 +51,6 @@ export const ProjectInitiationForm: React.FC<ProjectInitiationFormProps> = ({
   ) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (onSubmit) {
-      onSubmit(formData);
-    }
   };
 
   const handleDownloadPdf = async () => {

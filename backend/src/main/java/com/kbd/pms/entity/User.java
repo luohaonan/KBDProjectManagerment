@@ -31,6 +31,10 @@ public class User {
     )
     private Set<Role> roles;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "department_id")
+    private OrgDepartmentEntity department;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -59,6 +63,8 @@ public class User {
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
     public Set<Role> getRoles() { return roles; }
     public void setRoles(Set<Role> roles) { this.roles = roles; }
+    public OrgDepartmentEntity getDepartment() { return department; }
+    public void setDepartment(OrgDepartmentEntity department) { this.department = department; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }

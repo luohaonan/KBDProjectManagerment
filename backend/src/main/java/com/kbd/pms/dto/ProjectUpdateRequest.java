@@ -33,6 +33,8 @@ public record ProjectUpdateRequest(
     LocalDate plannedIndDate,
     /** 预估NDA获批日期（对应G9计划日期） */
     LocalDate plannedNdaDate,
+    /** 预估项目结束日期 */
+    LocalDate plannedEndDate,
     /** 阶段预算至PCC（万元） */
     BigDecimal budgetToPcc,
     /** 科学风险：靶点有效性风险、成药性风险、安全性风险 */

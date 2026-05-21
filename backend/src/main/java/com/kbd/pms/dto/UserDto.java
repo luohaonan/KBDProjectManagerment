@@ -13,6 +13,8 @@ public class UserDto {
     private String email;
     private Boolean isActive;
     private List<String> roles;
+    private Long departmentId;
+    private String departmentName;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -23,6 +25,10 @@ public class UserDto {
         dto.setEmail(user.getEmail());
         dto.setIsActive(user.getIsActive());
         dto.setRoles(user.getRoles().stream().map(r -> r.getName()).collect(Collectors.toList()));
+        if (user.getDepartment() != null) {
+            dto.setDepartmentId(user.getDepartment().getId());
+            dto.setDepartmentName(user.getDepartment().getDeptName());
+        }
         dto.setCreatedAt(user.getCreatedAt());
         dto.setUpdatedAt(user.getUpdatedAt());
         return dto;
@@ -39,6 +45,10 @@ public class UserDto {
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
     public List<String> getRoles() { return roles; }
     public void setRoles(List<String> roles) { this.roles = roles; }
+    public Long getDepartmentId() { return departmentId; }
+    public void setDepartmentId(Long departmentId) { this.departmentId = departmentId; }
+    public String getDepartmentName() { return departmentName; }
+    public void setDepartmentName(String departmentName) { this.departmentName = departmentName; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

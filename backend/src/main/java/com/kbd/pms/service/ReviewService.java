@@ -166,7 +166,7 @@ public class ReviewService {
   }
 
   /**
-   * 审批人执行决策 - 通过/驳回
+   * 审批人执行决策 - Go / Conditional Go / No Go
    */
   @Transactional
   public ReviewApprovalDto executeDecision(long projectId, long taskId, ReviewDecisionRequest request) {
@@ -191,22 +191,32 @@ public class ReviewService {
       throw new ApiException(409, "审批记录状态不允许审批: " + approval.getStatus());
     }
 
+    String decision = request.decision();
+    if (!List.of("GO", "CONDITIONAL_GO", "NO_GO").contains(decision)) {
+      throw new ApiException(400, "无效的决策类型: " + decision + "，有效值为: GO, CONDITIONAL_GO, NO_GO");
+    }
+
     // 更新任务状态
     LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
-    task.setStatus("APPROVED".equals(request.decision())
+    boolean isApproved = "GO".equals(decision) || "CONDITIONAL_GO".equals(decision);
+    task.setStatus(isApproved
         ? ReviewApprovalTaskEntity.Status.APPROVED
         : ReviewApprovalTaskEntity.Status.REJECTED);
-    task.setDecision(request.decision());
+    task.setDecision(decision);
     task.setOpinion(request.opinion());
     task.setDecidedAt(now);
     task.setUpdatedAt(Instant.now());
     reviewApprovalTaskRepository.save(task);
 
+    String actionType = switch (decision) {
+      case "GO" -> "GO";
+      case "CONDITIONAL_GO" -> "CONDITIONAL_GO";
+      case "NO_GO" -> "NO_GO";
+      default -> "REJECT";
+    };
+
     writeReviewRecord(projectId, approval.getProjectMilestoneId(), approval.getId(),
-        request.decision().equals("APPROVED") ? "APPROVE" : "REJECT",
-        request.actorUserId(),
-        request.decision().equals("APPROVED") ? "PASS" : "FAIL",
-        request.opinion());
+        actionType, request.actorUserId(), decision, request.opinion());
 
     // 检查所有审批人状态
     List<ReviewApprovalTaskEntity> allTasks =
@@ -217,6 +227,7 @@ public class ReviewService {
         .anyMatch(t -> t.getStatus() == ReviewApprovalTaskEntity.Status.REJECTED);
 
     if (anyRejected) {
+      // 任一审批人选择 NO_GO → 整体驳回
       approval.setStatus(ReviewApprovalEntity.Status.REJECTED);
       approval.setFinishedAt(now);
       approval.setUpdatedAt(Instant.now());
@@ -226,63 +237,105 @@ public class ReviewService {
           .orElse(null);
       if (pm != null) {
         String from = pm.getStatus().name();
-        pm.setStatus(Enums.ProjectMilestoneStatus.IN_PROGRESS);
-        pm.setUpdatedAt(Instant.now());
-        projectMilestoneRepository.save(pm);
-
-        writeMilestoneHistory(project.getId(), pm.getId(),
-            MilestoneHistoryEntity.Action.DECISION,
-            request.actorUserId(), from, pm.getStatus().name(),
-            "评审驳回: " + request.opinion());
-      }
-
-      project.setReviewStatus("REJECTED");
-      project.setUpdatedAt(Instant.now());
-      projectRepository.save(project);
-
-    } else if (allApproved) {
-      approval.setStatus(ReviewApprovalEntity.Status.APPROVED);
-      approval.setFinishedAt(now);
-      approval.setUpdatedAt(Instant.now());
-      reviewApprovalRepository.save(approval);
-
-      ProjectMilestoneEntity pm = projectMilestoneRepository.findById(approval.getProjectMilestoneId())
-          .orElse(null);
-      if (pm != null) {
-        String from = pm.getStatus().name();
-        pm.setStatus(Enums.ProjectMilestoneStatus.APPROVED);
-        pm.setDecisionResult(Enums.MilestoneDecisionResult.GO);
+        pm.setStatus(Enums.ProjectMilestoneStatus.REJECTED);
+        pm.setDecisionResult(Enums.MilestoneDecisionResult.NO_GO);
         pm.setDecisionAt(now);
         pm.setDecidedBy(request.actorUserId());
         pm.setDecisionNotes(request.opinion());
         pm.setUpdatedAt(Instant.now());
         projectMilestoneRepository.save(pm);
 
-        MilestoneDefEntity currentDef = milestoneDefRepository.findById(pm.getMilestoneId()).orElse(null);
-        if (currentDef != null) {
-          MilestoneDefEntity nextDef = findNextMilestone(currentDef);
-          if (nextDef != null) {
-            ProjectMilestoneEntity next =
-                projectMilestoneRepository.findByProjectIdAndMilestoneId(project.getId(), nextDef.getId());
-            if (next != null && next.getStatus() == Enums.ProjectMilestoneStatus.NOT_STARTED) {
-              next.setStatus(Enums.ProjectMilestoneStatus.IN_PROGRESS);
-              next.setUpdatedAt(Instant.now());
-              projectMilestoneRepository.save(next);
-            }
-            project.setCurrentMilestoneId(nextDef.getId());
-          }
-        }
-
         writeMilestoneHistory(project.getId(), pm.getId(),
             MilestoneHistoryEntity.Action.DECISION,
             request.actorUserId(), from, pm.getStatus().name(),
-            "评审通过: " + request.opinion());
+            "评审不通过 (No Go): " + request.opinion());
       }
 
-      project.setReviewStatus("APPROVED");
-      project.setStatus(Enums.ProjectStatus.ACTIVE);
+      // No Go → 项目终止
+      project.setReviewStatus("NO_GO");
+      project.setStatus(Enums.ProjectStatus.TERMINATED);
       project.setUpdatedAt(Instant.now());
       projectRepository.save(project);
+
+    } else if (allApproved) {
+      // 所有审批人都已决策
+      // 检查是否有 CONDITIONAL_GO
+      boolean hasConditionalGo = allTasks.stream()
+          .anyMatch(t -> "CONDITIONAL_GO".equals(t.getDecision()));
+
+      if (hasConditionalGo) {
+        // 有条件通过 - 里程碑状态变为 CONDITIONAL_APPROVED
+        approval.setStatus(ReviewApprovalEntity.Status.APPROVED);
+        approval.setFinishedAt(now);
+        approval.setUpdatedAt(Instant.now());
+        reviewApprovalRepository.save(approval);
+
+        ProjectMilestoneEntity pm = projectMilestoneRepository.findById(approval.getProjectMilestoneId())
+            .orElse(null);
+        if (pm != null) {
+          String from = pm.getStatus().name();
+          pm.setStatus(Enums.ProjectMilestoneStatus.CONDITIONAL_APPROVED);
+          pm.setDecisionResult(Enums.MilestoneDecisionResult.CONDITIONAL_GO);
+          pm.setDecisionAt(now);
+          pm.setDecidedBy(request.actorUserId());
+          pm.setDecisionNotes(request.opinion());
+          pm.setUpdatedAt(Instant.now());
+          projectMilestoneRepository.save(pm);
+
+          writeMilestoneHistory(project.getId(), pm.getId(),
+              MilestoneHistoryEntity.Action.DECISION,
+              request.actorUserId(), from, pm.getStatus().name(),
+              "有条件通过 (Conditional Go): " + request.opinion());
+        }
+
+        project.setReviewStatus("CONDITIONAL_GO");
+        project.setUpdatedAt(Instant.now());
+        projectRepository.save(project);
+      } else {
+        // 全部 Go → 正常通过，进入下一阶段
+        approval.setStatus(ReviewApprovalEntity.Status.APPROVED);
+        approval.setFinishedAt(now);
+        approval.setUpdatedAt(Instant.now());
+        reviewApprovalRepository.save(approval);
+
+        ProjectMilestoneEntity pm = projectMilestoneRepository.findById(approval.getProjectMilestoneId())
+            .orElse(null);
+        if (pm != null) {
+          String from = pm.getStatus().name();
+          pm.setStatus(Enums.ProjectMilestoneStatus.APPROVED);
+          pm.setDecisionResult(Enums.MilestoneDecisionResult.GO);
+          pm.setDecisionAt(now);
+          pm.setDecidedBy(request.actorUserId());
+          pm.setDecisionNotes(request.opinion());
+          pm.setUpdatedAt(Instant.now());
+          projectMilestoneRepository.save(pm);
+
+          MilestoneDefEntity currentDef = milestoneDefRepository.findById(pm.getMilestoneId()).orElse(null);
+          if (currentDef != null) {
+            MilestoneDefEntity nextDef = findNextMilestone(currentDef);
+            if (nextDef != null) {
+              ProjectMilestoneEntity next =
+                  projectMilestoneRepository.findByProjectIdAndMilestoneId(project.getId(), nextDef.getId());
+              if (next != null && next.getStatus() == Enums.ProjectMilestoneStatus.NOT_STARTED) {
+                next.setStatus(Enums.ProjectMilestoneStatus.IN_PROGRESS);
+                next.setUpdatedAt(Instant.now());
+                projectMilestoneRepository.save(next);
+              }
+              project.setCurrentMilestoneId(nextDef.getId());
+            }
+          }
+
+          writeMilestoneHistory(project.getId(), pm.getId(),
+              MilestoneHistoryEntity.Action.DECISION,
+              request.actorUserId(), from, pm.getStatus().name(),
+              "评审通过 (Go): " + request.opinion());
+        }
+
+        project.setReviewStatus("APPROVED");
+        project.setStatus(Enums.ProjectStatus.ACTIVE);
+        project.setUpdatedAt(Instant.now());
+        projectRepository.save(project);
+      }
     }
 
     return toApprovalDto(approval);
@@ -339,28 +392,42 @@ public class ReviewService {
   }
 
   private void createApproverTasks(ProjectEntity project, ReviewApprovalEntity approval) {
-    if (project.getPmcCommitteeId() == null) {
-      throw new ApiException(409, "项目未配置 PMC 委员会，无法创建审批任务");
+    // 1. 部门负责人审批（如果有主导部门配置）
+    // TODO: 根据 milestone_dept_role 配置查找部门负责人
+    // 当前简化实现：先创建 PMC 审批任务
+
+    // 2. 项目经理审批
+    if (project.getPmUserId() != null) {
+      ReviewApprovalTaskEntity pmTask = new ReviewApprovalTaskEntity();
+      pmTask.setReviewApprovalId(approval.getId());
+      pmTask.setApproverUserId(project.getPmUserId());
+      pmTask.setApproverRole("ROLE_PM");
+      pmTask.setSortOrder(0);
+      pmTask.setStatus(ReviewApprovalTaskEntity.Status.PENDING);
+      pmTask.setCreatedAt(Instant.now());
+      pmTask.setUpdatedAt(Instant.now());
+      reviewApprovalTaskRepository.save(pmTask);
     }
 
-    List<Long> pmcMemberIds = governanceCommitteeMemberRepository
-        .findActiveMemberIds(project.getPmcCommitteeId(), LocalDate.now(ZoneOffset.UTC));
+    // 3. PMC 委员会审批
+    if (project.getPmcCommitteeId() != null) {
+      List<Long> pmcMemberIds = governanceCommitteeMemberRepository
+          .findActiveMemberIds(project.getPmcCommitteeId(), LocalDate.now(ZoneOffset.UTC));
 
-    if (pmcMemberIds.isEmpty()) {
-      throw new ApiException(409, "PMC 委员会无有效成员，无法创建审批任务");
-    }
-
-    int sortOrder = 0;
-    for (Long memberId : pmcMemberIds) {
-      ReviewApprovalTaskEntity task = new ReviewApprovalTaskEntity();
-      task.setReviewApprovalId(approval.getId());
-      task.setApproverUserId(memberId);
-      task.setApproverRole("ROLE_PMC");
-      task.setSortOrder(sortOrder++);
-      task.setStatus(ReviewApprovalTaskEntity.Status.PENDING);
-      task.setCreatedAt(Instant.now());
-      task.setUpdatedAt(Instant.now());
-      reviewApprovalTaskRepository.save(task);
+      if (!pmcMemberIds.isEmpty()) {
+        int sortOrder = 1;
+        for (Long memberId : pmcMemberIds) {
+          ReviewApprovalTaskEntity task = new ReviewApprovalTaskEntity();
+          task.setReviewApprovalId(approval.getId());
+          task.setApproverUserId(memberId);
+          task.setApproverRole("ROLE_PMC");
+          task.setSortOrder(sortOrder++);
+          task.setStatus(ReviewApprovalTaskEntity.Status.PENDING);
+          task.setCreatedAt(Instant.now());
+          task.setUpdatedAt(Instant.now());
+          reviewApprovalTaskRepository.save(task);
+        }
+      }
     }
   }
 
@@ -397,13 +464,25 @@ public class ReviewService {
   private void writeReviewRecord(
       long projectId, long projectMilestoneId, Long reviewApprovalId,
       String action, long actorUserId, String result, String opinion) {
+    // 从审批任务中获取审批人角色
+    String actorRole = "ROLE_PMC";
+    if (reviewApprovalId != null) {
+      List<ReviewApprovalTaskEntity> tasks = reviewApprovalTaskRepository
+          .findByReviewApprovalIdOrderBySortOrderAsc(reviewApprovalId);
+      actorRole = tasks.stream()
+          .filter(t -> t.getApproverUserId() != null && t.getApproverUserId() == actorUserId)
+          .findFirst()
+          .map(ReviewApprovalTaskEntity::getApproverRole)
+          .orElse("ROLE_PMC");
+    }
+
     ReviewRecordEntity record = new ReviewRecordEntity();
     record.setProjectId(projectId);
     record.setProjectMilestoneId(projectMilestoneId);
     record.setReviewApprovalId(reviewApprovalId);
     record.setAction(action);
     record.setActorUserId(actorUserId);
-    record.setActorRole("ROLE_PMC");
+    record.setActorRole(actorRole);
     record.setResult(result);
     record.setOpinion(opinion);
     record.setActionAt(LocalDateTime.now(ZoneOffset.UTC));

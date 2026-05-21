@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { AlertTriangle, CheckCircle, Clock, ArrowRight, BarChart3, Download, Calendar, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Clock, ArrowRight, BarChart3, Download, Calendar, Plus, Trash2, X, ClipboardList } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -293,10 +293,16 @@ const Dashboard: React.FC = () => {
             </CardContent>
           </Card>
 
-          {/* 待办评审 */}
-          <Card className="bg-slate-800 border-slate-600">
+          {/* 评审中心 */}
+          <Card
+            className="bg-slate-800 border-slate-600 cursor-pointer hover:bg-slate-700 transition"
+            onClick={() => navigate('/review-center')}
+          >
             <CardHeader>
-              <CardTitle className="text-slate-100">待办评审</CardTitle>
+              <CardTitle className="text-slate-100 flex items-center gap-2">
+                <ClipboardList className="w-5 h-5 text-blue-400" />
+                评审中心
+              </CardTitle>
             </CardHeader>
             <CardContent>
               {stats && stats.pendingMilestoneReviews > 0 ? (
@@ -310,6 +316,10 @@ const Dashboard: React.FC = () => {
               ) : (
                 <p className="text-slate-400">暂无待办评审</p>
               )}
+              <div className="mt-2 flex items-center text-xs text-blue-400">
+                <span>点击进入评审中心</span>
+                <ArrowRight className="w-3 h-3 ml-1" />
+              </div>
             </CardContent>
           </Card>
         </div>
