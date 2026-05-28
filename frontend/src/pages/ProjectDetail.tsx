@@ -11,7 +11,7 @@ import { MilestoneConsole } from '../components/MilestoneConsole';
 import { DocumentList } from '../components/DocumentList';
 import { BudgetTracker } from '../components/BudgetTracker';
 import { ChangeRequestForm } from '../components/ChangeRequestForm';
-import { ChevronLeft, FileText, CheckCircle, AlertCircle, Loader2, X, Calendar } from 'lucide-react';
+import { ChevronLeft, FileText, CheckCircle, AlertCircle, Loader2, X, Calendar, ClipboardList } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -72,13 +72,22 @@ interface ProjectData {
 const ProjectDetail: React.FC = () => {
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const [project, setProject] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  // 立项申请相关状态
+  const [showInitiation, setShowInitiation] = useState(false);
+  const [initiationData, setInitiationData] = useState<any>(null);
+  const [initiationLoading, setInitiationLoading] = useState(false);
+  const [applicationContent, setApplicationContent] = useState('');
+  const [submittingInitiation, setSubmittingInitiation] = useState(false);
+  const [approvalOpinion, setApprovalOpinion] = useState('');
+  const [approvingTaskId, setApprovingTaskId] = useState<number | null>(null);
+  const [approvingDecision, setApprovingDecision] = useState<string>('');
   const [editForm, setEditForm] = useState({
     projectName: '',
     levelCode: '',
@@ -227,6 +236,101 @@ const ProjectDetail: React.FC = () => {
       console.error('Update project error:', error);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ==================== 立项申请相关函数 ====================
+
+  const openInitiationDialog = async () => {
+    if (!projectId) return;
+    setShowInitiation(true);
+    setInitiationLoading(true);
+    try {
+      const res = await api.get(`/api/initiations/${projectId}`);
+      const data = res.data as { code: number; data: any; message?: string };
+      if (data.code === 200 || data.code === 0) {
+        setInitiationData(data.data);
+        if (data.data?.applicationContent) {
+          setApplicationContent(data.data.applicationContent);
+        }
+      } else {
+        // 没有立项申请记录，清空
+        setInitiationData(null);
+        setApplicationContent('');
+      }
+    } catch {
+      setInitiationData(null);
+      setApplicationContent('');
+    } finally {
+      setInitiationLoading(false);
+    }
+  };
+
+  const handleSubmitInitiation = async () => {
+    if (!projectId || !user?.id) return;
+    if (!applicationContent.trim()) {
+      toast.error('请填写立项申请信息');
+      return;
+    }
+    setSubmittingInitiation(true);
+    try {
+      const res = await api.post(`/api/initiations/${projectId}/submit`, {
+        actorUserId: user.id,
+        applicationContent: applicationContent.trim(),
+      });
+      const data = res.data as { code: number; data: any; message?: string };
+      if (data.code === 200 || data.code === 0) {
+        toast.success('立项申请已提交！');
+        setInitiationData(data.data);
+        // 刷新项目数据
+        const projRes = await api.get(`/api/projects/${projectId}`);
+        const projData = projRes.data as { code: number; data: ProjectData; message?: string };
+        if (projData.code === 200 || projData.code === 0) {
+          setProject(projData.data);
+        }
+      } else {
+        toast.error(data.message || '提交失败');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || '提交失败');
+    } finally {
+      setSubmittingInitiation(false);
+    }
+  };
+
+  const handleInitiationDecision = async (taskId: number, decision: string) => {
+    if (!projectId || !user?.id) return;
+    if (!approvalOpinion.trim()) {
+      toast.error('请填写审批意见');
+      return;
+    }
+    setApprovingTaskId(taskId);
+    setApprovingDecision(decision);
+    try {
+      const res = await api.post(`/api/initiations/${projectId}/tasks/${taskId}/decision`, {
+        actorUserId: user.id,
+        decision,
+        opinion: approvalOpinion.trim(),
+      });
+      const data = res.data as { code: number; data: any; message?: string };
+      if (data.code === 200 || data.code === 0) {
+        toast.success(decision === 'APPROVED' ? '已同意立项申请！' : '已拒绝立项申请！');
+        setInitiationData(data.data);
+        setApprovalOpinion('');
+        // 刷新项目数据
+        const projRes = await api.get(`/api/projects/${projectId}`);
+        const projData = projRes.data as { code: number; data: ProjectData; message?: string };
+        if (projData.code === 200 || projData.code === 0) {
+          setProject(projData.data);
+        }
+      } else {
+        toast.error(data.message || '操作失败');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || '操作失败');
+    } finally {
+      setApprovingTaskId(null);
+      setApprovingDecision('');
     }
   };
 
@@ -491,6 +595,15 @@ const ProjectDetail: React.FC = () => {
                 <Button variant="outline" className="bg-slate-700 text-slate-100 border-slate-600" onClick={() => setActiveTab('change-request')}>
                   项目变更
                 </Button>
+                {(hasRole('ROLE_PM') || hasRole('ROLE_PMC')) && (
+                  <Button
+                    className="bg-purple-600 hover:bg-purple-700 text-white"
+                    onClick={openInitiationDialog}
+                  >
+                    <ClipboardList className="w-4 h-4 mr-2" />
+                    立项申请
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -991,6 +1104,247 @@ const ProjectDetail: React.FC = () => {
                   {saving ? '保存中...' : '保存'}
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* 立项申请弹窗 */}
+      {showInitiation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <Card className="w-full max-w-5xl mx-4 bg-slate-800 border-slate-600 max-h-[90vh] overflow-y-auto">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-slate-100 flex items-center gap-2">
+                <ClipboardList className="w-5 h-5 text-purple-400" />
+                立项申请
+              </CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowInitiation(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {initiationLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
+                  <span className="ml-3 text-slate-300">加载中...</span>
+                </div>
+              ) : (
+                <>
+                  {/* 项目信息（只读） */}
+                  <div>
+                    <h3 className="text-slate-100 font-semibold mb-4 pb-2 border-b border-slate-600">项目信息</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-slate-400">项目名称：</span>
+                        <span className="text-slate-100">{project?.projectName}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">项目编号：</span>
+                        <span className="text-slate-100">{project?.projectCode}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">项目分级：</span>
+                        <span className="text-slate-100">{project?.levelName} ({project?.levelCode})</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">靶点/通路：</span>
+                        <span className="text-slate-100">{project?.targetPathway || '-'}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">适应症：</span>
+                        <span className="text-slate-100">{project?.indication || '-'}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">当前阶段：</span>
+                        <span className="text-slate-100">{project?.lifecyclePhaseLabel || '-'}</span>
+                      </div>
+                      <div className="md:col-span-2">
+                        <span className="text-slate-400">项目简介：</span>
+                        <span className="text-slate-100">{project?.tppSummary || '-'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 申请信息栏 - 项目经理可见 */}
+                  {hasRole('ROLE_PM') && (
+                    <div>
+                      <h3 className="text-slate-100 font-semibold mb-4 pb-2 border-b border-slate-600">申请信息</h3>
+                      {!initiationData || initiationData.status === 'REJECTED' ? (
+                        <div className="space-y-4">
+                          <Textarea
+                            placeholder="请填写立项申请内容..."
+                            value={applicationContent}
+                            onChange={(e) => setApplicationContent(e.target.value)}
+                            rows={6}
+                            className="bg-slate-700 border-slate-600 text-slate-100"
+                          />
+                          <div className="flex justify-end">
+                            <Button
+                              onClick={handleSubmitInitiation}
+                              disabled={submittingInitiation}
+                              className="bg-purple-600 hover:bg-purple-700 text-white"
+                            >
+                              {submittingInitiation ? '提交中...' : '提交立项申请'}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="p-4 bg-slate-700 rounded">
+                            <p className="text-slate-300 whitespace-pre-wrap">{initiationData.applicationContent || '无申请内容'}</p>
+                          </div>
+                          <div className="flex items-center gap-2 text-sm">
+                            <span className="text-slate-400">提交人：</span>
+                            <span className="text-slate-100">{initiationData.submitterName || '-'}</span>
+                            <span className="text-slate-400 ml-4">提交时间：</span>
+                            <span className="text-slate-100">
+                              {initiationData.submittedAt ? new Date(initiationData.submittedAt).toLocaleString('zh-CN') : '-'}
+                            </span>
+                            <span className="text-slate-400 ml-4">状态：</span>
+                            <Badge className={
+                              initiationData.status === 'APPROVED' ? 'bg-green-600' :
+                              initiationData.status === 'REJECTED' ? 'bg-red-600' :
+                              'bg-yellow-600'
+                            }>
+                              {initiationData.status === 'APPROVED' ? '已通过' :
+                               initiationData.status === 'REJECTED' ? '已驳回' : '审批中'}
+                            </Badge>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 审批信息栏 - PMC成员可见 */}
+                  {hasRole('ROLE_PMC') && initiationData && initiationData.status === 'SUBMITTED' && (
+                    <div>
+                      <h3 className="text-slate-100 font-semibold mb-4 pb-2 border-b border-slate-600">审批信息</h3>
+                      <div className="space-y-4">
+                        {/* 申请内容展示 */}
+                        <div className="p-4 bg-slate-700 rounded">
+                          <p className="text-sm text-slate-400 mb-2">申请内容：</p>
+                          <p className="text-slate-100 whitespace-pre-wrap">{initiationData.applicationContent || '无申请内容'}</p>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="text-slate-400">提交人：</span>
+                          <span className="text-slate-100">{initiationData.submitterName || '-'}</span>
+                          <span className="text-slate-400 ml-4">提交时间：</span>
+                          <span className="text-slate-100">
+                            {initiationData.submittedAt ? new Date(initiationData.submittedAt).toLocaleString('zh-CN') : '-'}
+                          </span>
+                        </div>
+                        {/* 审批意见输入 */}
+                        <div>
+                          <label className="block text-sm font-medium text-slate-300 mb-2">审批意见</label>
+                          <Textarea
+                            placeholder="请填写审批意见..."
+                            value={approvalOpinion}
+                            onChange={(e) => setApprovalOpinion(e.target.value)}
+                            rows={3}
+                            className="bg-slate-700 border-slate-600 text-slate-100"
+                          />
+                        </div>
+                        <div className="flex justify-end gap-3">
+                          <Button
+                            onClick={() => handleInitiationDecision(
+                              initiationData.tasks?.find((t: any) => t.approverUserId === user?.id && t.status === 'PENDING')?.id,
+                              'REJECTED'
+                            )}
+                            disabled={approvingTaskId !== null || !initiationData.tasks?.find((t: any) => t.approverUserId === user?.id && t.status === 'PENDING')}
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                          >
+                            {approvingTaskId !== null && approvingDecision === 'REJECTED' ? '处理中...' : '拒绝'}
+                          </Button>
+                          <Button
+                            onClick={() => handleInitiationDecision(
+                              initiationData.tasks?.find((t: any) => t.approverUserId === user?.id && t.status === 'PENDING')?.id,
+                              'APPROVED'
+                            )}
+                            disabled={approvingTaskId !== null || !initiationData.tasks?.find((t: any) => t.approverUserId === user?.id && t.status === 'PENDING')}
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                          >
+                            {approvingTaskId !== null && approvingDecision === 'APPROVED' ? '处理中...' : '同意'}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 立项审批卡片 - 显示所有PMC成员的审批情况 */}
+                  {initiationData && initiationData.tasks && initiationData.tasks.length > 0 && (
+                    <div>
+                      <h3 className="text-slate-100 font-semibold mb-4 pb-2 border-b border-slate-600">立项审批情况</h3>
+                      <div className="space-y-3">
+                        {initiationData.tasks.map((task: any) => (
+                          <div key={task.id} className="p-4 bg-slate-700 rounded flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                              <div className="w-10 h-10 rounded-full bg-slate-600 flex items-center justify-center text-slate-300 font-semibold">
+                                {task.approverName?.charAt(0) || '?'}
+                              </div>
+                              <div>
+                                <p className="text-slate-100 font-medium">{task.approverName}</p>
+                                <p className="text-xs text-slate-400">{task.approverRole === 'ROLE_PMC' ? 'PMC成员' : task.approverRole}</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              {task.status === 'PENDING' ? (
+                                <Badge className="bg-yellow-600">待审批</Badge>
+                              ) : task.status === 'APPROVED' ? (
+                                <div>
+                                  <Badge className="bg-green-600 mb-1">已同意</Badge>
+                                  {task.decidedAt && (
+                                    <p className="text-xs text-slate-400">{new Date(task.decidedAt).toLocaleString('zh-CN')}</p>
+                                  )}
+                                </div>
+                              ) : (
+                                <div>
+                                  <Badge className="bg-red-600 mb-1">已拒绝</Badge>
+                                  {task.decidedAt && (
+                                    <p className="text-xs text-slate-400">{new Date(task.decidedAt).toLocaleString('zh-CN')}</p>
+                                  )}
+                                </div>
+                              )}
+                              {task.opinion && (
+                                <p className="text-xs text-slate-400 mt-1 max-w-[200px] truncate" title={task.opinion}>
+                                  意见：{task.opinion}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {initiationData.status === 'APPROVED' && (
+                        <div className="mt-4 p-4 bg-green-900/30 border border-green-700 rounded">
+                          <p className="text-green-400 font-semibold">✓ 立项申请已全部通过</p>
+                          {initiationData.finishedAt && (
+                            <p className="text-sm text-green-300 mt-1">
+                              完成时间：{new Date(initiationData.finishedAt).toLocaleString('zh-CN')}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      {initiationData.status === 'REJECTED' && (
+                        <div className="mt-4 p-4 bg-red-900/30 border border-red-700 rounded">
+                          <p className="text-red-400 font-semibold">✗ 立项申请已被驳回</p>
+                          <p className="text-sm text-red-300 mt-1">项目经理可以重新提交立项申请</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 无立项申请记录时显示提示 */}
+                  {!initiationData && hasRole('ROLE_PMC') && (
+                    <div className="text-center py-8 text-slate-400">
+                      暂无立项申请记录
+                    </div>
+                  )}
+                </>
+              )}
             </CardContent>
           </Card>
         </div>

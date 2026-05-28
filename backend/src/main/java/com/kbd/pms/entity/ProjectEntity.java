@@ -106,6 +106,19 @@ public class ProjectEntity {
   @Column(name = "review_submitted_at")
   private LocalDateTime reviewSubmittedAt;
 
+  /** 立项状态：null(未申请)/SUBMITTED(已提交)/APPROVED(已通过)/REJECTED(已驳回) */
+  @Column(name = "initiation_status", length = 32)
+  private String initiationStatus;
+
+  /** 立项申请提交时间 */
+  @Column(name = "initiation_submitted_at")
+  private LocalDateTime initiationSubmittedAt;
+
+  /** 立项申请信息 */
+  @Lob
+  @Column(name = "initiation_application")
+  private String initiationApplication;
+
   @Lob
   @Column(name = "terminated_reason")
   private String terminatedReason;
@@ -216,6 +229,12 @@ public class ProjectEntity {
   public void setReviewStatus(String reviewStatus) { this.reviewStatus = reviewStatus; }
   public LocalDateTime getReviewSubmittedAt() { return reviewSubmittedAt; }
   public void setReviewSubmittedAt(LocalDateTime reviewSubmittedAt) { this.reviewSubmittedAt = reviewSubmittedAt; }
+  public String getInitiationStatus() { return initiationStatus; }
+  public void setInitiationStatus(String initiationStatus) { this.initiationStatus = initiationStatus; }
+  public LocalDateTime getInitiationSubmittedAt() { return initiationSubmittedAt; }
+  public void setInitiationSubmittedAt(LocalDateTime initiationSubmittedAt) { this.initiationSubmittedAt = initiationSubmittedAt; }
+  public String getInitiationApplication() { return initiationApplication; }
+  public void setInitiationApplication(String initiationApplication) { this.initiationApplication = initiationApplication; }
   public String getTerminatedReason() { return terminatedReason; }
   public void setTerminatedReason(String terminatedReason) { this.terminatedReason = terminatedReason; }
   public LocalDate getStartDate() { return startDate; }
