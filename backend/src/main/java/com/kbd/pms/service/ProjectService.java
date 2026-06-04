@@ -361,6 +361,7 @@ public class ProjectService {
         project.getPmUserId(),
         project.getStatus().name(),
         lifecyclePhaseLabel,
+        project.getInitiationStatus(),
         oversightDto,
         milestoneDto,
         budgetDto);
@@ -502,6 +503,7 @@ public class ProjectService {
         project.getPmUserId(),
         project.getStatus().name(),
         lifecyclePhaseLabel,
+        project.getInitiationStatus(),
         oversightDto,
         milestoneDto,
         budgetDto);

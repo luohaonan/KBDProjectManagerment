@@ -50,6 +50,7 @@ interface ProjectData {
   projectStatus: string;
   lifecyclePhaseLabel: string | null;
   reviewStatus?: string;
+  initiationStatus?: string | null;
   processOversightDept: {
     deptId: number;
     deptCode: string;
@@ -72,7 +73,7 @@ interface ProjectData {
 const ProjectDetail: React.FC = () => {
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const { user, hasRole } = useAuth();
+  const { user, hasRole, hasPermission } = useAuth();
   const [project, setProject] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +89,16 @@ const ProjectDetail: React.FC = () => {
   const [approvalOpinion, setApprovalOpinion] = useState('');
   const [approvingTaskId, setApprovingTaskId] = useState<number | null>(null);
   const [approvingDecision, setApprovingDecision] = useState<string>('');
+  const sameUserId = (a?: number | null, b?: number | null) =>
+    a != null && b != null && Number(a) === Number(b);
+  const canApproveInitiation = hasPermission('PERMISSION_APPROVE_INITIATION');
+  const myPendingInitiationTask = initiationData?.tasks?.find(
+    (t: { approverUserId: number; status: string }) =>
+      sameUserId(t.approverUserId, user?.id) && t.status === 'PENDING'
+  );
+  const isInitiationApproved = project?.initiationStatus === 'APPROVED';
+  const canUploadDeliverables =
+    user?.department === '新药资讯部' && user?.username === 'efficiency_user';
   const [editForm, setEditForm] = useState({
     projectName: '',
     levelCode: '',
@@ -317,11 +328,12 @@ const ProjectDetail: React.FC = () => {
         toast.success(decision === 'APPROVED' ? '已同意立项申请！' : '已拒绝立项申请！');
         setInitiationData(data.data);
         setApprovalOpinion('');
-        // 刷新项目数据
         const projRes = await api.get(`/api/projects/${projectId}`);
         const projData = projRes.data as { code: number; data: ProjectData; message?: string };
         if (projData.code === 200 || projData.code === 0) {
           setProject(projData.data);
+        } else if (data.data?.status) {
+          setProject((prev) => (prev ? { ...prev, initiationStatus: data.data.status } : prev));
         }
       } else {
         toast.error(data.message || '操作失败');
@@ -595,7 +607,7 @@ const ProjectDetail: React.FC = () => {
                 <Button variant="outline" className="bg-slate-700 text-slate-100 border-slate-600" onClick={() => setActiveTab('change-request')}>
                   项目变更
                 </Button>
-                {(hasRole('ROLE_PM') || hasRole('ROLE_PMC')) && (
+                {(hasRole('ROLE_PM') || canApproveInitiation) && (
                   <Button
                     className="bg-purple-600 hover:bg-purple-700 text-white"
                     onClick={openInitiationDialog}
@@ -618,6 +630,8 @@ const ProjectDetail: React.FC = () => {
             currentUserId={user?.id}
             currentUserRoles={user?.roles}
             reviewStatus={project.reviewStatus}
+            initiationApproved={isInitiationApproved}
+            canUploadDeliverables={canUploadDeliverables}
             onReview={() => {
               // 评审提交后刷新项目数据
               api.get(`/api/projects/${projectId}`).then((res) => {
@@ -1220,17 +1234,16 @@ const ProjectDetail: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 审批信息栏 - PMC成员可见 */}
-                  {hasRole('ROLE_PMC') && initiationData && initiationData.status === 'SUBMITTED' && (
+                  {/* 审批信息栏 - 拥有「审批立项申请」权限的用户可见 */}
+                  {canApproveInitiation && initiationData && (
                     <div>
                       <h3 className="text-slate-100 font-semibold mb-4 pb-2 border-b border-slate-600">审批信息</h3>
                       <div className="space-y-4">
-                        {/* 申请内容展示 */}
                         <div className="p-4 bg-slate-700 rounded">
                           <p className="text-sm text-slate-400 mb-2">申请内容：</p>
                           <p className="text-slate-100 whitespace-pre-wrap">{initiationData.applicationContent || '无申请内容'}</p>
                         </div>
-                        <div className="flex items-center gap-2 text-sm">
+                        <div className="flex items-center gap-2 text-sm flex-wrap">
                           <span className="text-slate-400">提交人：</span>
                           <span className="text-slate-100">{initiationData.submitterName || '-'}</span>
                           <span className="text-slate-400 ml-4">提交时间：</span>
@@ -1238,107 +1251,152 @@ const ProjectDetail: React.FC = () => {
                             {initiationData.submittedAt ? new Date(initiationData.submittedAt).toLocaleString('zh-CN') : '-'}
                           </span>
                         </div>
-                        {/* 审批意见输入 */}
-                        <div>
-                          <label className="block text-sm font-medium text-slate-300 mb-2">审批意见</label>
-                          <Textarea
-                            placeholder="请填写审批意见..."
-                            value={approvalOpinion}
-                            onChange={(e) => setApprovalOpinion(e.target.value)}
-                            rows={3}
-                            className="bg-slate-700 border-slate-600 text-slate-100"
-                          />
-                        </div>
-                        <div className="flex justify-end gap-3">
-                          <Button
-                            onClick={() => handleInitiationDecision(
-                              initiationData.tasks?.find((t: any) => t.approverUserId === user?.id && t.status === 'PENDING')?.id,
-                              'REJECTED'
+
+                        {/* 全部审批人及状态 */}
+                        {initiationData.tasks && initiationData.tasks.length > 0 && (
+                          <div>
+                            <p className="text-sm font-medium text-slate-300 mb-2">审批人进度</p>
+                            <div className="space-y-2">
+                              {initiationData.tasks.map((task: {
+                                id: number;
+                                approverName: string;
+                                approverRole: string;
+                                status: string;
+                                opinion?: string;
+                                decidedAt?: string;
+                              }) => {
+                                const statusStyle =
+                                  task.status === 'APPROVED'
+                                    ? 'border-green-600 bg-green-950/40'
+                                    : task.status === 'REJECTED'
+                                    ? 'border-red-600 bg-red-950/40'
+                                    : 'border-yellow-600 bg-yellow-950/30';
+                                const statusBadge =
+                                  task.status === 'APPROVED'
+                                    ? <Badge className="bg-green-600">已同意</Badge>
+                                    : task.status === 'REJECTED'
+                                    ? <Badge className="bg-red-600">已拒绝</Badge>
+                                    : <Badge className="bg-yellow-600">待审批</Badge>;
+                                return (
+                                  <div
+                                    key={task.id}
+                                    className={`p-3 rounded border flex items-center justify-between ${statusStyle}`}
+                                  >
+                                    <div>
+                                      <p className="text-slate-100 font-medium">{task.approverName}</p>
+                                      <p className="text-xs text-slate-400">
+                                        {task.approverRole === 'ROLE_PMC' ? 'PMC成员' : task.approverRole}
+                                      </p>
+                                      {task.opinion && (
+                                        <p className="text-xs text-slate-400 mt-1">意见：{task.opinion}</p>
+                                      )}
+                                    </div>
+                                    <div className="text-right">
+                                      {statusBadge}
+                                      {task.decidedAt && (
+                                        <p className="text-xs text-slate-400 mt-1">
+                                          {new Date(task.decidedAt).toLocaleString('zh-CN')}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {initiationData.status === 'SUBMITTED' && (
+                          <>
+                            <div>
+                              <label className="block text-sm font-medium text-slate-300 mb-2">审批意见</label>
+                              <Textarea
+                                placeholder="请填写审批意见..."
+                                value={approvalOpinion}
+                                onChange={(e) => setApprovalOpinion(e.target.value)}
+                                rows={3}
+                                className="bg-slate-700 border-slate-600 text-slate-100"
+                                disabled={!myPendingInitiationTask}
+                              />
+                            </div>
+                            {!myPendingInitiationTask && (
+                              <p className="text-sm text-slate-400">
+                                {initiationData.tasks?.some((t: { approverUserId: number }) =>
+                                  sameUserId(t.approverUserId, user?.id)
+                                )
+                                  ? '您已完成本项目的立项审批'
+                                  : '当前账号不在本项目的审批人列表中，或审批任务尚未生成（请刷新页面）'}
+                              </p>
                             )}
-                            disabled={approvingTaskId !== null || !initiationData.tasks?.find((t: any) => t.approverUserId === user?.id && t.status === 'PENDING')}
-                            className="bg-red-600 hover:bg-red-700 text-white"
-                          >
-                            {approvingTaskId !== null && approvingDecision === 'REJECTED' ? '处理中...' : '拒绝'}
-                          </Button>
-                          <Button
-                            onClick={() => handleInitiationDecision(
-                              initiationData.tasks?.find((t: any) => t.approverUserId === user?.id && t.status === 'PENDING')?.id,
-                              'APPROVED'
-                            )}
-                            disabled={approvingTaskId !== null || !initiationData.tasks?.find((t: any) => t.approverUserId === user?.id && t.status === 'PENDING')}
-                            className="bg-green-600 hover:bg-green-700 text-white"
-                          >
-                            {approvingTaskId !== null && approvingDecision === 'APPROVED' ? '处理中...' : '同意'}
-                          </Button>
-                        </div>
+                            <div className="flex justify-end gap-3">
+                              <Button
+                                onClick={() => handleInitiationDecision(myPendingInitiationTask!.id, 'REJECTED')}
+                                disabled={approvingTaskId !== null || !myPendingInitiationTask}
+                                className="bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
+                              >
+                                {approvingTaskId !== null && approvingDecision === 'REJECTED' ? '处理中...' : '拒绝'}
+                              </Button>
+                              <Button
+                                onClick={() => handleInitiationDecision(myPendingInitiationTask!.id, 'APPROVED')}
+                                disabled={approvingTaskId !== null || !myPendingInitiationTask}
+                                className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
+                              >
+                                {approvingTaskId !== null && approvingDecision === 'APPROVED' ? '处理中...' : '同意'}
+                              </Button>
+                            </div>
+                          </>
+                        )}
+
+                        {initiationData.status === 'APPROVED' && (
+                          <div className="p-4 bg-green-900/30 border border-green-700 rounded">
+                            <p className="text-green-400 font-semibold">立项申请已全部通过</p>
+                          </div>
+                        )}
+                        {initiationData.status === 'REJECTED' && (
+                          <div className="p-4 bg-red-900/30 border border-red-700 rounded">
+                            <p className="text-red-400 font-semibold">立项申请已被驳回</p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
 
-                  {/* 立项审批卡片 - 显示所有PMC成员的审批情况 */}
-                  {initiationData && initiationData.tasks && initiationData.tasks.length > 0 && (
+                  {/* 项目经理查看审批进度 */}
+                  {hasRole('ROLE_PM') && initiationData?.tasks && initiationData.tasks.length > 0 && !canApproveInitiation && (
                     <div>
-                      <h3 className="text-slate-100 font-semibold mb-4 pb-2 border-b border-slate-600">立项审批情况</h3>
-                      <div className="space-y-3">
-                        {initiationData.tasks.map((task: any) => (
-                          <div key={task.id} className="p-4 bg-slate-700 rounded flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 rounded-full bg-slate-600 flex items-center justify-center text-slate-300 font-semibold">
-                                {task.approverName?.charAt(0) || '?'}
-                              </div>
-                              <div>
-                                <p className="text-slate-100 font-medium">{task.approverName}</p>
-                                <p className="text-xs text-slate-400">{task.approverRole === 'ROLE_PMC' ? 'PMC成员' : task.approverRole}</p>
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              {task.status === 'PENDING' ? (
-                                <Badge className="bg-yellow-600">待审批</Badge>
-                              ) : task.status === 'APPROVED' ? (
-                                <div>
-                                  <Badge className="bg-green-600 mb-1">已同意</Badge>
-                                  {task.decidedAt && (
-                                    <p className="text-xs text-slate-400">{new Date(task.decidedAt).toLocaleString('zh-CN')}</p>
-                                  )}
-                                </div>
-                              ) : (
-                                <div>
-                                  <Badge className="bg-red-600 mb-1">已拒绝</Badge>
-                                  {task.decidedAt && (
-                                    <p className="text-xs text-slate-400">{new Date(task.decidedAt).toLocaleString('zh-CN')}</p>
-                                  )}
-                                </div>
-                              )}
-                              {task.opinion && (
-                                <p className="text-xs text-slate-400 mt-1 max-w-[200px] truncate" title={task.opinion}>
-                                  意见：{task.opinion}
-                                </p>
-                              )}
-                            </div>
+                      <h3 className="text-slate-100 font-semibold mb-4 pb-2 border-b border-slate-600">立项审批进度</h3>
+                      <div className="space-y-2">
+                        {initiationData.tasks.map((task: { id: number; approverName: string; status: string; opinion?: string }) => (
+                          <div
+                            key={task.id}
+                            className={`p-3 rounded border flex justify-between ${
+                              task.status === 'APPROVED'
+                                ? 'border-green-600 bg-green-950/40'
+                                : task.status === 'REJECTED'
+                                ? 'border-red-600 bg-red-950/40'
+                                : 'border-yellow-600 bg-yellow-950/30'
+                            }`}
+                          >
+                            <span className="text-slate-100">{task.approverName}</span>
+                            <Badge
+                              className={
+                                task.status === 'APPROVED'
+                                  ? 'bg-green-600'
+                                  : task.status === 'REJECTED'
+                                  ? 'bg-red-600'
+                                  : 'bg-yellow-600'
+                              }
+                            >
+                              {task.status === 'APPROVED' ? '已同意' : task.status === 'REJECTED' ? '已拒绝' : '待审批'}
+                            </Badge>
                           </div>
                         ))}
                       </div>
-                      {initiationData.status === 'APPROVED' && (
-                        <div className="mt-4 p-4 bg-green-900/30 border border-green-700 rounded">
-                          <p className="text-green-400 font-semibold">✓ 立项申请已全部通过</p>
-                          {initiationData.finishedAt && (
-                            <p className="text-sm text-green-300 mt-1">
-                              完成时间：{new Date(initiationData.finishedAt).toLocaleString('zh-CN')}
-                            </p>
-                          )}
-                        </div>
-                      )}
-                      {initiationData.status === 'REJECTED' && (
-                        <div className="mt-4 p-4 bg-red-900/30 border border-red-700 rounded">
-                          <p className="text-red-400 font-semibold">✗ 立项申请已被驳回</p>
-                          <p className="text-sm text-red-300 mt-1">项目经理可以重新提交立项申请</p>
-                        </div>
-                      )}
                     </div>
                   )}
 
                   {/* 无立项申请记录时显示提示 */}
-                  {!initiationData && hasRole('ROLE_PMC') && (
+                  {!initiationData && canApproveInitiation && (
                     <div className="text-center py-8 text-slate-400">
                       暂无立项申请记录
                     </div>

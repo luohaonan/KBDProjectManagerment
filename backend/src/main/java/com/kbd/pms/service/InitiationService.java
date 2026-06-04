@@ -10,13 +10,11 @@ import com.kbd.pms.entity.InitiationApprovalTaskEntity;
 import com.kbd.pms.entity.ProjectEntity;
 import com.kbd.pms.entity.User;
 import com.kbd.pms.exception.ApiException;
-import com.kbd.pms.repository.GovernanceCommitteeMemberRepository;
 import com.kbd.pms.repository.InitiationApprovalRepository;
 import com.kbd.pms.repository.InitiationApprovalTaskRepository;
 import com.kbd.pms.repository.ProjectRepository;
 import com.kbd.pms.repository.UserRepository;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -30,19 +28,17 @@ public class InitiationService {
   private final InitiationApprovalRepository initiationApprovalRepository;
   private final InitiationApprovalTaskRepository initiationApprovalTaskRepository;
   private final UserRepository userRepository;
-  private final GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository;
+  private static final String PERMISSION_APPROVE_INITIATION = "PERMISSION_APPROVE_INITIATION";
 
   public InitiationService(
       ProjectRepository projectRepository,
       InitiationApprovalRepository initiationApprovalRepository,
       InitiationApprovalTaskRepository initiationApprovalTaskRepository,
-      UserRepository userRepository,
-      GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository) {
+      UserRepository userRepository) {
     this.projectRepository = projectRepository;
     this.initiationApprovalRepository = initiationApprovalRepository;
     this.initiationApprovalTaskRepository = initiationApprovalTaskRepository;
     this.userRepository = userRepository;
-    this.governanceCommitteeMemberRepository = governanceCommitteeMemberRepository;
   }
 
   /**
@@ -82,7 +78,7 @@ public class InitiationService {
     projectRepository.save(project);
 
     // 自动创建PMC成员审批任务
-    createApproverTasks(project, approval);
+    createApproverTasks(approval);
 
     return toApprovalDto(approval);
   }
@@ -169,10 +165,15 @@ public class InitiationService {
   /**
    * 获取项目的立项申请审批状态
    */
-  @Transactional(readOnly = true)
+  @Transactional
   public InitiationApprovalDto getInitiationStatus(long projectId) {
     return initiationApprovalRepository.findTopByProjectIdOrderByCreatedAtDesc(projectId)
-        .map(this::toApprovalDto)
+        .map(approval -> {
+          if (approval.getStatus() == InitiationApprovalEntity.Status.SUBMITTED) {
+            ensureApproverTasks(approval);
+          }
+          return toApprovalDto(approval);
+        })
         .orElse(null);
   }
 
@@ -191,25 +192,50 @@ public class InitiationService {
 
   // ==================== 私有辅助方法 ====================
 
-  private void createApproverTasks(ProjectEntity project, InitiationApprovalEntity approval) {
-    // 获取PMC委员会的所有活跃成员
-    if (project.getPmcCommitteeId() != null) {
-      List<Long> pmcMemberIds = governanceCommitteeMemberRepository
-          .findActiveMemberIds(project.getPmcCommitteeId(), LocalDate.now(ZoneOffset.UTC));
-
-      int sortOrder = 1;
-      for (Long memberId : pmcMemberIds) {
-        InitiationApprovalTaskEntity task = new InitiationApprovalTaskEntity();
-        task.setInitiationApprovalId(approval.getId());
-        task.setApproverUserId(memberId);
-        task.setApproverRole("ROLE_PMC");
-        task.setSortOrder(sortOrder++);
-        task.setStatus(InitiationApprovalTaskEntity.Status.PENDING);
-        task.setCreatedAt(Instant.now());
-        task.setUpdatedAt(Instant.now());
-        initiationApprovalTaskRepository.save(task);
-      }
+  private void createApproverTasks(InitiationApprovalEntity approval) {
+    List<User> approvers =
+        userRepository.findActiveUsersByPermissionName(PERMISSION_APPROVE_INITIATION);
+    if (approvers.isEmpty()) {
+      throw new ApiException(500, "未配置拥有「审批立项申请」权限的审批人，无法发起立项审批");
     }
+
+    int sortOrder = 1;
+    for (User approver : approvers) {
+      if (approver.getId().equals(approval.getSubmitterUserId())) {
+        continue;
+      }
+      InitiationApprovalTaskEntity task = new InitiationApprovalTaskEntity();
+      task.setInitiationApprovalId(approval.getId());
+      task.setApproverUserId(approver.getId());
+      task.setApproverRole(resolvePrimaryRole(approver));
+      task.setSortOrder(sortOrder++);
+      task.setStatus(InitiationApprovalTaskEntity.Status.PENDING);
+      task.setCreatedAt(Instant.now());
+      task.setUpdatedAt(Instant.now());
+      initiationApprovalTaskRepository.save(task);
+    }
+
+    if (sortOrder == 1) {
+      throw new ApiException(500, "除提交人外无可用审批人，请为其他账号分配「审批立项申请」权限");
+    }
+  }
+
+  private void ensureApproverTasks(InitiationApprovalEntity approval) {
+    List<InitiationApprovalTaskEntity> existing =
+        initiationApprovalTaskRepository.findByInitiationApprovalIdOrderBySortOrderAsc(approval.getId());
+    if (!existing.isEmpty()) {
+      return;
+    }
+    projectRepository.findById(approval.getProjectId())
+        .orElseThrow(() -> new ApiException(404, "项目不存在: id=" + approval.getProjectId()));
+    createApproverTasks(approval);
+  }
+
+  private String resolvePrimaryRole(User user) {
+    return user.getRoles().stream()
+        .map(role -> role.getName())
+        .findFirst()
+        .orElse("APPROVER");
   }
 
   private InitiationApprovalDto toApprovalDto(InitiationApprovalEntity entity) {

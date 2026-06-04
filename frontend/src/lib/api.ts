@@ -2,7 +2,8 @@
 import axios from 'axios';
 import { toast } from 'sonner';
 
-const baseURL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
+// 开发默认同源（走 Vite /api 代理）；生产通过 VITE_API_BASE_URL 指定后端地址
+const baseURL = import.meta.env.VITE_API_BASE_URL ?? '';
 
 const api = axios.create({
   baseURL,

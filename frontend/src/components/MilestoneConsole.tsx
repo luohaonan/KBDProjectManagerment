@@ -61,6 +61,10 @@ interface MilestoneConsoleProps {
   currentUserId?: number;
   currentUserRoles?: string[];
   reviewStatus?: string;
+  /** 立项是否已全部审批通过 */
+  initiationApproved?: boolean;
+  /** 是否允许上传核心交付物（新药资讯部 efficiency_user） */
+  canUploadDeliverables?: boolean;
   onReview?: () => void;
 }
 
@@ -159,6 +163,8 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
   currentUserId,
   currentUserRoles = [],
   reviewStatus,
+  initiationApproved = false,
+  canUploadDeliverables = false,
   onReview,
 }) => {
   const [deliverables, setDeliverables] = useState<DeliverableItem[]>(
@@ -325,11 +331,25 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
 
   // 当前用户是否有待审批的任务
   const myPendingTask = activeReview?.tasks?.find(
-    t => t.approverUserId === currentUserId && t.status === 'PENDING'
+    t => Number(t.approverUserId) === Number(currentUserId) && t.status === 'PENDING'
   );
 
+  const consoleEditable = initiationApproved;
+  const allowUpload = consoleEditable && canUploadDeliverables;
+
   return (
-    <div className="space-y-6">
+    <div className={`space-y-6 ${!consoleEditable ? 'opacity-60' : ''}`}>
+      {!consoleEditable && (
+        <div className="p-4 bg-amber-900/30 border border-amber-700 rounded flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-amber-300 font-semibold">里程碑控制台暂不可用</p>
+            <p className="text-sm text-amber-200/80 mt-1">
+              需等待立项申请经全部审批人同意后，方可进行里程碑交付物上传与评审操作。
+            </p>
+          </div>
+        </div>
+      )}
       {/* 阶段信息头 */}
       <Card className="bg-slate-800 border-slate-600">
         <CardHeader>
@@ -357,9 +377,14 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
       </Card>
 
       {/* 核心交付物清单 */}
-      <Card className="bg-slate-800 border-slate-600">
+      <Card className={`bg-slate-800 border-slate-600 ${!consoleEditable ? 'pointer-events-none' : ''}`}>
         <CardHeader>
           <CardTitle className="text-slate-100">核心交付物清单</CardTitle>
+          {consoleEditable && !canUploadDeliverables && (
+            <p className="text-sm text-slate-400 mt-1">
+              仅「新药资讯部」的 efficiency_user 账号可上传交付物
+            </p>
+          )}
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -385,7 +410,7 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
                       <CheckCircle className="w-5 h-5" />
                       <span className="text-sm">{item.file?.name}</span>
                     </div>
-                  ) : (
+                  ) : allowUpload ? (
                     <label className="flex items-center gap-2 px-3 py-2 bg-slate-600 rounded cursor-pointer hover:bg-slate-500 transition">
                       <FileUp className="w-4 h-4 text-slate-300" />
                       <span className="text-sm text-slate-300">上传</span>
@@ -401,6 +426,8 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
                         accept=".pdf,.doc,.docx"
                       />
                     </label>
+                  ) : (
+                    <span className="text-sm text-slate-500">不可上传</span>
                   )}
                 </div>
               </div>
@@ -435,7 +462,7 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
       </Card>
 
       {/* 评审操作 */}
-      <Card className="bg-slate-800 border-slate-600">
+      <Card className={`bg-slate-800 border-slate-600 ${!consoleEditable ? 'pointer-events-none' : ''}`}>
         <CardHeader>
           <CardTitle className="text-slate-100">评审操作</CardTitle>
         </CardHeader>
@@ -456,7 +483,7 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
 
           {/* 操作按钮 - PM 角色 */}
           <div className="flex gap-4">
-            {isPm && !isUnderReview && !isApproved && (
+            {isPm && consoleEditable && !isUnderReview && !isApproved && (
               <>
                 <Button
                   disabled={!allRequiredUploaded || submitting}

@@ -52,6 +52,8 @@ public record ProjectDetailResponse(
      * 面向业务的阶段描述，例如立项后处于 G0：{@code G0-项目立项}。
      */
     String lifecyclePhaseLabel,
+    /** 立项状态：null / SUBMITTED / APPROVED / REJECTED */
+    String initiationStatus,
     ProcessOversightDeptDto processOversightDept,
     CurrentMilestoneDto currentMilestone,
     BudgetExecutionSummaryDto budgetExecution
