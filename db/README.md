@@ -1,272 +1,134 @@
-# 数据库脚本管理指南
+# 数据库管理指南
 
-## 📋 脚本概览
+## 📦 概述
 
-本文件夹包含所有数据库相关的脚本，分为九个演变阶段。
+本文件夹包含 KBD 项目管理系统（`kbd_pm_system`）的完整数据库导出文件和部署文档。数据库基于 **MySQL 8.0**，字符集为 `utf8mb4`。
 
-| 阶段 | 脚本文件 | 类型 | 说明 |
-|------|---------|------|------|
-| 1️⃣ | `ddl_mysql8.sql` | DDL | 初始化所有基础表（初始部署必需） |
-| 2️⃣ | `alter_project_add_process_oversight_dept.sql` | DDL | 添加流程监管部门字段 |
-| 3️⃣ | `alter_milestone_review_core.sql` | DDL | 添加里程碑评审相关表和字段 |
-| 4️⃣ | `rbac_ddl.sql` | DDL | 创建权限管理（RBAC）系统表 |
-| 4️⃣ | `rbac_init_data.sql` | DML | 初始化 RBAC 系统数据（角色、权限、用户） |
-| 5️⃣ | `create_document_management.sql` | DDL+DML | 创建文档管理表和权限 |
-| 6️⃣ | `alter_project_change_request_fields.sql` | DDL | 添加变更申请和终止任务表字段 |
-| 7️⃣ | `alter_add_budget_limit_table.sql` | DDL | 添加缺失的budget_limit表 |
-| 8️⃣ | `alter_lob_text_columns_to_tinytext.sql` | DDL | 修复 Hibernate @Lob 与 MySQL 列类型映射 |
-| 9️⃣ | `alter_project_add_initiation_fields.sql` | DDL | 扩展 project 表，增加立项表单完整字段 |
-| 🔟 | `alter_project_add_date_fields_and_risk.sql` | DDL | 扩展 project 表，增加日期字段、阶段预算、风险评估、建议与所需支持 |
-| 🔍 | `verify_migration.sql` | 验证 | 检查所有脚本是否正确应用 |
+## 🚀 快速部署
 
-## 🚀 快速开始
-
-### 新部署（从零开始）
-
-建议按顺序执行以确保完整性：
+### 一键导入（推荐）
 
 ```bash
-cd db
+# 1. 创建数据库（如尚未创建）
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS kbd_pm_system DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
-# 依次执行脚本
-mysql -u root -p kbd_pm_system < ddl_mysql8.sql
-mysql -u root -p kbd_pm_system < alter_project_add_process_oversight_dept.sql
-mysql -u root -p kbd_pm_system < alter_milestone_review_core.sql
-mysql -u root -p kbd_pm_system < rbac_ddl.sql
-mysql -u root -p kbd_pm_system < rbac_init_data.sql
-mysql -u root -p kbd_pm_system < create_document_management.sql
-mysql -u root -p kbd_pm_system < alter_project_change_request_fields.sql
-mysql -u root -p kbd_pm_system < alter_add_budget_limit_table.sql
-mysql -u root -p kbd_pm_system < alter_lob_text_columns_to_tinytext.sql
-mysql -u root -p kbd_pm_system < alter_project_budget_snapshot_snapshot_month_varchar.sql
-mysql -u root -p kbd_pm_system < alter_project_add_initiation_fields.sql
-mysql -u root -p kbd_pm_system < alter_project_add_date_fields_and_risk.sql
-
-# 验证迁移
-mysql -u root -p kbd_pm_system < verify_migration.sql
+# 2. 导入完整数据库（含表结构 + 种子数据）
+mysql -u root -p kbd_pm_system < kbd_pm_system_full.sql
 ```
 
-### 已有数据库，仅添加权限管理
+> 导入后即获得与当前开发环境完全一致的数据库，包含所有表、索引、外键、视图和种子数据。
 
-```bash
-cd db
+## 📊 数据库概览
 
-# 只需执行 RBAC 脚本
-mysql -u root -p kbd_pm_system < rbac_ddl.sql
-mysql -u root -p kbd_pm_system < rbac_init_data.sql
+| 指标 | 数值 |
+|------|------|
+| 数据库名 | `kbd_pm_system` |
+| 数据库引擎 | MySQL 8.0 |
+| 字符集 | utf8mb4 |
+| 表数量 | 36 个（含 1 个视图） |
+| 总行数 | ~240 行（含种子数据） |
 
-# 验证迁移
-mysql -u root -p kbd_pm_system < verify_migration.sql
-```
+### 表清单
 
-## 📚 详细文档
+| 类别 | 表名 | 行数 | 说明 |
+|------|------|:---:|------|
+| **组织架构** | `org_department` | 10 | 部门信息 |
+| | `iam_user` | 6 | 员工信息（组织关系） |
+| | `governance_committee` | 0 | 治理委员会 |
+| | `governance_committee_member` | 0 | 委员会成员 |
+| **项目管理** | `project` | 6 | 项目主表 |
+| | `project_level` | 7 | 项目分级定义 |
+| | `project_milestone` | 60 | 项目里程碑 |
+| | `project_team_member` | 0 | 项目团队成员 |
+| | `project_document` | 0 | 项目交付物 |
+| | `project_change_request` | 0 | 变更申请 |
+| | `project_termination_task` | 0 | 终止任务 |
+| **预算管理** | `project_budget_plan` | 0 | 预算计划 |
+| | `project_budget_ledger` | 0 | 预算明细 |
+| | `project_budget_snapshot` | 6 | 预算快照 |
+| | `project_budget_policy` | 6 | 预算策略 |
+| | `budget_limit` | 0 | 预算上限 |
+| **里程碑** | `milestone_def` | 10 | 里程碑定义字典 |
+| | `milestone_dept_role` | 0 | 里程碑部门角色 |
+| | `milestone_history` | 0 | 里程碑变更历史 |
+| **评审审批** | `review_record` | 0 | 评审记录 |
+| | `review_approval` | 0 | 评审审批 |
+| | `review_approval_task` | 0 | 评审审批任务 |
+| | `initiation_approval` | 2 | 立项审批 |
+| | `initiation_approval_task` | 3 | 立项审批任务 |
+| **权限管理** | `user` | 6 | 系统登录用户 |
+| | `role` | 6 | 角色定义 |
+| | `permission` | 29 | 权限定义 |
+| | `user_roles` | 12 | 用户-角色关联 |
+| | `role_permissions` | 73 | 角色-权限关联 |
+| **文档管理** | `document` | 0 | 文档存储 |
+| | `audit_log` | 0 | 审计日志 |
+| **工作流** | `wf_template` | 0 | 工作流模板 |
+| | `wf_template_node` | 0 | 工作流节点 |
+| | `wf_instance` | 0 | 工作流实例 |
+| | `wf_task` | 0 | 工作流任务 |
+| | `wf_action_log` | 0 | 工作流操作日志 |
+| **视图** | `v_pending_review_tasks` | - | 待评审任务视图 |
 
-| 文档 | 内容 | 适用场景 |
-|------|------|--------|
-| `DATABASE_APPLICATION_ORDER.md` | 脚本应用顺序详解 | 理解整个演变过程 |
-| `RBAC_MIGRATION_GUIDE.md` | RBAC 系统迁移指南 | 部署权限管理系统 |
-| `DOCUMENT_MANAGEMENT_MIGRATION_GUIDE.md` | 文档管理迁移指南 | 部署文档管理系统 |
-| `DATABASE_SCHEMA.md` | 数据库架构和设计 | 深入了解表结构 |
+## 👥 初始用户与角色
 
-## ✅ 关键问题解答
+### 预定义角色
 
-### Q1: 开发阶段是否需要严格按顺序执行?
+| 角色 | 标识 | 说明 |
+|------|------|------|
+| PMC（项目管理委员会） | `ROLE_PMC` | 最高决策权，Go/No Go 决策、重大变更审批 |
+| PM（项目经理） | `ROLE_PM` | 制定计划、监控预算、组织评审、提交变更 |
+| 职能部门负责人 | `ROLE_DEPT_HEAD` | 所属领域交付物提交 |
+| 效率管理部 | `ROLE_EFFICIENCY` | 系统维护、预算核算、预警监控 |
+| 药政合规部 | `ROLE_COMPLIANCE` | 合规性意见出具、申报文档审查 |
+| 系统管理员 | `ROLE_ADMIN` | 系统管理和配置 |
 
-**不需要！** 在开发阶段，所有脚本都已使用 `IF NOT EXISTS` 和 `INSERT IGNORE`：
-- ✓ 可以单独执行最新的脚本
-- ✓ 支持脚本重复运行
-- ✓ 无需按顺序执行前置脚本
-- ✓ 自动忽略已存在的对象
+### 初始用户
 
-### Q2: 生产环境是否需要按顺序执行?
+| 用户名 | 密码 | 角色 | 说明 |
+|--------|------|------|------|
+| `admin_user` | `test123` | ADMIN（全角色） | 系统管理员 |
+| `pmc_user` | `test123` | PMC | 项目管理委员会 |
+| `pm_user` | `test123` | PM | 项目经理 |
+| `dept_head` | `test123` | DEPT_HEAD | 部门负责人 |
+| `efficiency_user` | `test123` | EFFICIENCY | 效率管理部 |
+| `compliance_user` | `test123` | COMPLIANCE | 药政合规部 |
 
-**建议按顺序执行！** 虽然脚本相对独立，但为确保数据完整性：
-- ✓ 按阶段顺序执行确保逻辑清晰
-- ✓ 避免遗漏任何依赖的前置配置
-- ✓ 便于问题排查和演变追踪
+> ⚠️ **生产环境必须修改所有初始密码！** 密码使用 BCrypt 加密存储。
 
-### Q3: 如何验证迁移成功？
+## 🗂️ 种子数据说明
 
-运行验证脚本：
-```bash
-mysql -u root -p kbd_pm_system < verify_migration.sql
-```
+导入后数据库包含以下示例数据，用于开发和测试：
 
-应该看到：
-- 基础表 ≥ 15 个
-- RBAC 表 = 5 个
-- 文档管理表 = 2 个
-- 角色 = 6 个
-- 权限 ≥ 26 个（包含文档管理权限）
-- 用户 = 6 个
-
-### Q3: 如果需要回滚 RBAC？
-
-```sql
--- 安全的回滚（只删除 RBAC 表，保留其他表）
-DROP TABLE IF EXISTS role_permissions;
-DROP TABLE IF EXISTS user_roles;
-DROP TABLE IF EXISTS permission;
-DROP TABLE IF EXISTS role;
-DROP TABLE IF EXISTS user;
-```
-
-## 🔄 数据库演变流程
-
-```
-第1阶段 → 第2阶段 → 第3阶段 → 第4阶段 → 第5阶段
-   ↓          ↓          ↓          ↓          ↓
-基础表    流程部门    里程碑系统   权限管理   文档管理
-  15+        2+         2+         5个        2个
- 个表      字段       新表         新表       新表
-
-开发阶段：可单独执行第5阶段脚本（前置脚本已应用）
-生产部署：建议按顺序执行所有阶段
-```
-
-## 🎯 每个脚本的作用
-
-### 1. `ddl_mysql8.sql` 
-**初始化核心数据库结构**
-- 部门、员工、委员会管理
-- 项目分级、里程碑字典
-- 项目、预算、审批等核心表
-
-### 2. `alter_project_add_process_oversight_dept.sql`
-**扩展：流程监管部门追踪**
-- 给 `project` 表添加 `process_oversight_dept_id` 字段
-- 用于追踪项目的流程监管部门
-
-### 3. `alter_milestone_review_core.sql`
-**扩展：里程碑评审功能**
-- 给 `project` 表添加 `terminated_reason` 字段
-- 给 `project_milestone` 表添加 `conditional_deadline` 字段
-- 创建 `project_document` 表（交付物管理）
-- 创建 `milestone_history` 表（评审历史追踪）
-
-### 4. `rbac_ddl.sql`
-**新增：权限管理系统**
-- 创建 `user` 表（系统登录）
-- 创建 `role` 表（角色定义）
-- 创建 `permission` 表（权限定义）
-- 创建 `user_roles` 表（用户-角色映射）
-- 创建 `role_permissions` 表（角色-权限映射）
-
-### 5. `rbac_init_data.sql`
-**初始化：权限系统数据**
-- 6 个预定义角色：PMC、PM、部门负责人、效率部、合规部、管理员
-- 21 个权限：涵盖里程碑、预算、项目、交付物、变更、系统等
-- 6 个测试用户，密码均为 `test123`（**生产环境必改**）
-
-### 6. `create_document_management.sql`
-**新增：文档管理系统**
-- 创建 `document` 表（文档信息存储）
-- 创建 `audit_log` 表（操作审计日志）
-- 添加 5 个文档管理权限
-- 为相关角色自动分配文档权限
-
-### 7. `verify_migration.sql`
-**验证：检查迁移完整性**
-- 检查所有表是否创建
-- 验证关键字段是否存在
-- 统计数据完整性
-- 生成最终报告
-
-### 9. `alter_project_add_initiation_fields.sql`
-**扩展：项目立项表单完整字段**
-- 给 `project` 表添加 12 个新字段
-- 项目描述（description）
-- 生物学机制（mechanism）
-- 未满足的临床需求（unmet_needs）
-- 科学依据（scientific_basis）
-- 预期适应症（expected_indication）
-- 给药途径（administration_route）
-- 剂型（dosage_form）
-- 剂量频率（dosage_frequency）
-- 预期疗效指标（efficacy_target）
-- 安全性优势（safety_advantage）
-- 差异化优势（differentiation）
-- 总预算（budget_total）
-
-### 10. `alter_project_add_date_fields_and_risk.sql`
-**扩展：项目日期、阶段预算、风险评估、建议与所需支持**
-- 给 `project` 表添加 8 个新字段
-- 预估PCC提名日期（planned_pcc_date）- 对应里程碑G0的计划日期
-- 预估IND获批日期（planned_ind_date）- 对应里程碑G5的计划日期
-- 预估NDA获批日期（planned_nda_date）- 对应里程碑G9的计划日期
-- 阶段预算至PCC（budget_to_pcc）
-- 科学风险（risk_scientific）- 靶点有效性风险、成药性风险、安全性风险
-- 竞争风险（risk_competitive）- 主要竞品进展
-- 注册风险（risk_regulatory）- 法规路径不确定性
-- 建议与所需支持（suggestion_and_support）
-
-## ⚠️ 重要提醒
-
-### 生产环境
-
-1. **修改初始密码**
-   - 所有测试用户密码均为 `test123`
-   - 必须修改为强密码
-
-2. **配置 JWT**
-   ```bash
-   export JWT_SECRET="your-secret-key-at-least-32-characters"
-   export JWT_EXPIRATION=86400000
-   ```
-
-3. **审查权限**
-   - 确保每个角色的权限分配正确
-   - 定期审查用户权限
-
-### 备份
-
-执行任何修改脚本前，建议备份数据库：
-```bash
-mysqldump -u root -p kbd_pm_system > kbd_pm_system_backup_$(date +%Y%m%d).sql
-```
-
-## 📞 故障排查
-
-### 问题：表已存在错误
-```
-Error: Table 'user' already exists
-```
-✓ 解决：脚本已使用 `IF NOT EXISTS`，可安全重试
-
-### 问题：外键约束错误
-```
-Error: Cannot add or update a child row
-```
-✓ 解决：确认所有前置阶段脚本都已应用
-
-### 问题：字符编码问题
-```
-Error: Incorrect string value
-```
-✓ 解决：确保 MySQL 使用 `utf8mb4` 编码
+- **6 个示例项目**：涵盖不同阶段的新药研发项目
+- **60 个里程碑**：每个项目包含 G0~G9 共 10 个里程碑
+- **10 个里程碑定义**：G0（靶点确认）到 G9（NDA 获批）
+- **10 个部门**：研发各部门组织架构
+- **6 个员工**：对应初始用户的组织人员信息
+- **7 个项目等级**：S/A/B/C/D 等级及预算策略
+- **2 个立项审批**：示例审批流程数据
 
 ## 🔍 常用查询
 
-### 查看所有表
-```sql
-SHOW TABLES;
-```
-
-### 查看表结构
-```sql
-DESCRIBE user;
-DESC project;
-```
-
 ### 查看用户权限
 ```sql
-SELECT DISTINCT p.name, p.description
+SELECT DISTINCT pe.name, pe.description
 FROM user u
 JOIN user_roles ur ON u.id = ur.user_id
 JOIN role r ON ur.role_id = r.id
 JOIN role_permissions rp ON r.id = rp.role_id
-JOIN permission p ON rp.permission_id = p.id
-WHERE u.username = 'pm_user';
+JOIN permission pe ON rp.permission_id = pe.id
+WHERE u.username = 'pm_user'
+ORDER BY pe.name;
+```
+
+### 查看项目及其里程碑
+```sql
+SELECT p.id, p.name AS project, m.name AS milestone, pm.status, pm.planned_date
+FROM project p
+JOIN project_milestone pm ON pm.project_id = p.id
+JOIN milestone_def m ON m.id = pm.milestone_def_id
+ORDER BY p.id, pm.milestone_def_id;
 ```
 
 ### 查看外键关系
@@ -276,22 +138,36 @@ FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
 WHERE CONSTRAINT_SCHEMA = 'kbd_pm_system';
 ```
 
-## 📊 版本历史
+## 💾 备份与恢复
 
-| 版本 | 日期 | 说明 |
-|------|------|------|
-| 1.3 | 2026-05-12 | 扩展 project 表，增加日期字段、阶段预算、风险评估、建议与所需支持（8个新字段） |
-| 1.2 | 2026-05-07 | 扩展 project 表，增加立项表单完整字段（12个新字段） |
-| 1.1 | 2026-04-27 | 添加文档管理模块，支持开发阶段灵活应用 |
-| 1.0 | 2026-04-27 | 初始版本，包含 RBAC 系统 |
+### 导出当前数据库
+```bash
+mysqldump -u root -p --databases kbd_pm_system \
+ --add-drop-database --add-drop-table \
+ --routines --triggers --single-transaction \
+ --default-character-set=utf8mb4 \
+ --result-file="kbd_pm_system_$(date +%Y%m%d_%H%M%S).sql"
+```
 
-## 🎓 学习资源
+### 恢复数据库
+```bash
+mysql -u root -p kbd_pm_system < kbd_pm_system_full.sql
+```
 
-- [MySQL 官方文档](https://dev.mysql.com/doc/)
-- [Spring Security 指南](https://spring.io/projects/spring-security)
-- [JWT 标准](https://jwt.io)
+## ⚠️ 注意事项
+
+1. **密码安全**：初始密码为 `test123`，生产环境必须修改
+2. **JWT 配置**：确保 `JWT_SECRET` 至少 32 个字符（见 `application.yml`）
+3. **字符编码**：必须使用 `utf8mb4`，否则中文数据可能乱码
+4. **MySQL 版本**：需要 MySQL 8.0+（使用了 CTE、窗口函数等特性）
+5. **外键约束**：导入时如遇外键错误，可临时关闭外键检查：
+  ```sql
+  SET FOREIGN_KEY_CHECKS = 0;
+  -- 执行导入
+  SET FOREIGN_KEY_CHECKS = 1;
+  ```
 
 ---
 
-**最后更新**: 2026-04-27
-**维护人**: 系统开发团队
+**最后更新**: 2026-06-23
+**导出文件**: `kbd_pm_system_full.sql`（包含完整的 DDL + DML）

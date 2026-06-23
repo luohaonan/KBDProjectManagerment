@@ -15,8 +15,8 @@ interface UserInfo {
   email: string;
   isActive: boolean;
   roles: string[];
-  departmentId?: number;
-  departmentName?: string;
+  departmentIds?: number[];
+  departmentNames?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -67,7 +67,7 @@ const AccountManagement: React.FC = () => {
   const [selectedAddUserId, setSelectedAddUserId] = useState<number | undefined>(undefined);
 
   // 表单状态
-  const [newUser, setNewUser] = useState({ username: '', password: '', email: '', roles: [] as string[], departmentId: undefined as number | undefined });
+  const [newUser, setNewUser] = useState({ username: '', password: '', email: '', roles: [] as string[], departmentIds: [] as number[] });
   const [newPassword, setNewPassword] = useState('');
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
@@ -108,7 +108,7 @@ const AccountManagement: React.FC = () => {
       await api.post('/api/users', newUser);
       toast.success('用户创建成功');
       setShowCreateUser(false);
-      setNewUser({ username: '', password: '', email: '', roles: [], departmentId: undefined });
+      setNewUser({ username: '', password: '', email: '', roles: [], departmentIds: [] });
       loadData();
     } catch (error: any) {
       toast.error(error.response?.data?.message || '创建用户失败');
@@ -377,7 +377,9 @@ const AccountManagement: React.FC = () => {
                           </div>
                         </td>
                         <td className="p-4 text-sm text-slate-400">
-                          {u.departmentName || '-'}
+                          {(u.departmentNames && u.departmentNames.length > 0)
+                            ? u.departmentNames.join(', ')
+                            : '-'}
                         </td>
                         <td className="p-4">
                           <Badge variant="outline" className={u.isActive ? 'bg-green-900/30 text-green-300 border-green-700' : 'bg-red-900/30 text-red-300 border-red-700'}>
@@ -606,17 +608,27 @@ const AccountManagement: React.FC = () => {
                 </div>
               </div>
               <div>
-                <label className="block text-sm text-slate-400 mb-2">所属部门</label>
-                <select
-                  value={newUser.departmentId || ''}
-                  onChange={e => setNewUser({ ...newUser, departmentId: e.target.value ? Number(e.target.value) : undefined })}
-                  className="w-full bg-slate-700 border border-slate-600 text-white rounded px-3 py-2 text-sm"
-                >
-                  <option value="">无部门</option>
+                <label className="block text-sm text-slate-400 mb-2">所属部门（可多选）</label>
+                <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
                   {departments.map(dept => (
-                    <option key={dept.id} value={dept.id}>{dept.deptName}</option>
+                    <button
+                      key={dept.id}
+                      onClick={() => {
+                        const ids = newUser.departmentIds.includes(dept.id)
+                          ? newUser.departmentIds.filter(id => id !== dept.id)
+                          : [...newUser.departmentIds, dept.id];
+                        setNewUser({ ...newUser, departmentIds: ids });
+                      }}
+                      className={`px-3 py-1 rounded text-sm border ${
+                        newUser.departmentIds.includes(dept.id)
+                          ? 'bg-green-600 border-green-500 text-white'
+                          : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
+                      }`}
+                    >
+                      {dept.deptName}
+                    </button>
                   ))}
-                </select>
+                </div>
               </div>
               <Button onClick={handleCreateUser} className="w-full bg-blue-600 hover:bg-blue-700">
                 <Save className="w-4 h-4 mr-2" />

@@ -30,7 +30,7 @@ const AppContent: React.FC = () => {
             <div className="flex items-center gap-4 text-sm text-slate-700">
               <div>
                 <span className="font-medium">{user?.username}</span>
-                {user?.department ? ` | ${user.department}` : ''}
+                {user?.departments?.length ? ` | ${user.departments.join(', ')}` : ''}
               </div>
               <Button variant="outline" size="sm" onClick={handleAccountManagement}>
                 账号管理

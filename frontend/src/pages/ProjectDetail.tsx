@@ -98,7 +98,7 @@ const ProjectDetail: React.FC = () => {
   );
   const isInitiationApproved = project?.initiationStatus === 'APPROVED';
   const canUploadDeliverables =
-    user?.department === '新药资讯部' && user?.username === 'efficiency_user';
+    user?.departments?.includes('新药资讯部') && user?.username === 'efficiency_user';
   const [editForm, setEditForm] = useState({
     projectName: '',
     levelCode: '',

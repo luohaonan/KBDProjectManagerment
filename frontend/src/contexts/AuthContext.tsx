@@ -6,7 +6,7 @@ interface User {
   username: string;
   roles: string[];
   permissions?: string[];
-  department?: string | null;
+  departments?: string[];
 }
 
 interface AuthContextType {
@@ -58,7 +58,7 @@ const buildUserFromToken = (token: string): User | null => {
     username: payload.sub,
     roles,
     permissions,
-    department: payload.department || payload.dept || null,
+    departments: Array.isArray(payload.depts) ? payload.depts : [],
     id: typeof payload.id === 'number' ? payload.id : undefined,
   };
 };
@@ -95,7 +95,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           username: data.username,
           roles: data.roles || [],
           permissions: data.permissions || [],
-          department: data.department || prev.department,
+          departments: data.departmentNames || [],
         } : prev);
       }
     } catch (error) {
