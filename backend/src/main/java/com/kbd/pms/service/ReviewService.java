@@ -7,11 +7,11 @@ import com.kbd.pms.dto.ReviewDecisionRequest;
 import com.kbd.pms.dto.ReviewRecordDto;
 import com.kbd.pms.dto.ReviewSubmitRequest;
 import com.kbd.pms.dto.SaveDraftRequest;
+import com.kbd.pms.entity.Enums;
 import com.kbd.pms.entity.InitiationApprovalEntity;
 import com.kbd.pms.entity.InitiationApprovalTaskEntity;
 import com.kbd.pms.repository.InitiationApprovalRepository;
 import com.kbd.pms.repository.InitiationApprovalTaskRepository;
-import com.kbd.pms.entity.Enums;
 import com.kbd.pms.entity.IamUserEntity;
 import com.kbd.pms.entity.MilestoneDefEntity;
 import com.kbd.pms.entity.MilestoneHistoryEntity;
@@ -54,6 +54,7 @@ public class ReviewService {
   private final GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository;
   private final InitiationApprovalRepository initiationApprovalRepository;
   private final InitiationApprovalTaskRepository initiationApprovalTaskRepository;
+  private final SecurityHelper securityHelper;
 
   public ReviewService(
       ProjectRepository projectRepository,
@@ -66,7 +67,8 @@ public class ReviewService {
       IamUserRepository iamUserRepository,
       GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository,
       InitiationApprovalRepository initiationApprovalRepository,
-      InitiationApprovalTaskRepository initiationApprovalTaskRepository) {
+      InitiationApprovalTaskRepository initiationApprovalTaskRepository,
+      SecurityHelper securityHelper) {
     this.projectRepository = projectRepository;
     this.projectMilestoneRepository = projectMilestoneRepository;
     this.milestoneDefRepository = milestoneDefRepository;
@@ -78,6 +80,7 @@ public class ReviewService {
     this.governanceCommitteeMemberRepository = governanceCommitteeMemberRepository;
     this.initiationApprovalRepository = initiationApprovalRepository;
     this.initiationApprovalTaskRepository = initiationApprovalTaskRepository;
+    this.securityHelper = securityHelper;
   }
 
   // ==================== 公开 API ====================
@@ -391,6 +394,87 @@ public class ReviewService {
     List<ReviewRecordEntity> records =
         reviewRecordRepository.findByActorUserIdOrderByActionAtDesc(userId);
     return records.stream().map(this::toRecordDto).toList();
+  }
+
+  /**
+   * 获取当前用户的统一待办任务列表（从JWT安全上下文中获取userId，防止客户端伪造）
+   */
+  @Transactional(readOnly = true)
+  public List<PendingReviewTaskDto> getPendingTasksForCurrentUser() {
+    long userId = securityHelper.getCurrentUserId();
+    return getPendingTasks(userId);
+  }
+
+  /**
+   * 获取当前用户的评审历史（含里程碑评审 + 立项审批决策），从JWT安全上下文中获取userId
+   */
+  @Transactional(readOnly = true)
+  public List<ReviewRecordDto> getMyReviewRecordsForCurrentUser() {
+    long userId = securityHelper.getCurrentUserId();
+    List<ReviewRecordDto> records = new java.util.ArrayList<>();
+
+    // 1. 里程碑评审记录
+    List<ReviewRecordEntity> milestoneRecords =
+        reviewRecordRepository.findByActorUserIdOrderByActionAtDesc(userId);
+    for (ReviewRecordEntity rec : milestoneRecords) {
+      try {
+        ProjectEntity project = projectRepository.findById(rec.getProjectId()).orElse(null);
+        if (project == null) continue;
+        String projectName = project.getProjectName();
+        String milestoneName = "";
+        String milestoneCode = "";
+        ProjectMilestoneEntity pm = projectMilestoneRepository.findById(rec.getProjectMilestoneId()).orElse(null);
+        if (pm != null) {
+          MilestoneDefEntity def = milestoneDefRepository.findById(pm.getMilestoneId()).orElse(null);
+          if (def != null) {
+            milestoneName = def.getMilestoneName();
+            milestoneCode = def.getMilestoneCode();
+          }
+        }
+        records.add(new ReviewRecordDto(
+            rec.getId(), rec.getProjectId(), rec.getProjectMilestoneId(),
+            rec.getAction(), rec.getActorUserId(), projectName,
+            rec.getActorRole(), rec.getResult(), rec.getOpinion(), rec.getActionAt()
+        ));
+      } catch (Exception e) {
+        // skip
+      }
+    }
+
+    // 2. 立项审批决策记录
+    List<InitiationApprovalTaskEntity> initiationTasks =
+        initiationApprovalTaskRepository.findByApproverUserIdOrderByCreatedAtDesc(userId);
+    for (InitiationApprovalTaskEntity task : initiationTasks) {
+      try {
+        if (task.getStatus() == InitiationApprovalTaskEntity.Status.PENDING) continue;
+        InitiationApprovalEntity approval = initiationApprovalRepository.findById(task.getInitiationApprovalId()).orElse(null);
+        if (approval == null) continue;
+        ProjectEntity project = projectRepository.findById(approval.getProjectId()).orElse(null);
+        if (project == null) continue;
+
+        String action = task.getDecision() != null && "APPROVED".equals(task.getDecision()) ? "APPROVE" : "REJECT";
+        String taskResult = task.getDecision() != null ? task.getDecision() : "SUBMITTED";
+
+        records.add(new ReviewRecordDto(
+            task.getId(), project.getId(), 0L,
+            action, task.getApproverUserId(), project.getProjectName(),
+            task.getApproverRole(), taskResult, task.getOpinion(),
+            task.getDecidedAt()
+        ));
+      } catch (Exception e) {
+        // skip
+      }
+    }
+
+    // 按时间降序排序
+    records.sort((a, b) -> {
+      if (a.actionAt() == null && b.actionAt() == null) return 0;
+      if (a.actionAt() == null) return 1;
+      if (b.actionAt() == null) return -1;
+      return b.actionAt().compareTo(a.actionAt());
+    });
+
+    return records;
   }
 
   /**

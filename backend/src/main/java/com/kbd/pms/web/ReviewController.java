@@ -16,7 +16,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -83,31 +82,22 @@ public class ReviewController {
   }
 
   /**
-   * 获取当前用户的审批任务（作为审批人）- 仅里程碑评审
-   */
-  @GetMapping("/my-tasks")
-  public Result<List<ReviewApprovalTaskDto>> getMyApprovalTasks(
-      @RequestParam("userId") long userId) {
-    return Result.ok(reviewService.getMyApprovalTasks(userId));
-  }
-
-  /**
-   * 获取当前用户提交的评审记录 - 仅里程碑评审
-   */
-  @GetMapping("/my-records")
-  public Result<List<ReviewRecordDto>> getMyReviewRecords(
-      @RequestParam("userId") long userId) {
-    return Result.ok(reviewService.getMyReviewRecords(userId));
-  }
-
-  /**
    * 获取统一待办任务列表（里程碑评审 + 立项审批）
-   * 这是评审中心前端使用的聚合接口
+   * userId从JWT Token中提取，不接受客户端参数
    */
   @GetMapping("/pending-tasks")
-  public Result<List<PendingReviewTaskDto>> getPendingTasks(
-      @RequestParam("userId") long userId) {
-    List<PendingReviewTaskDto> tasks = reviewService.getPendingTasks(userId);
+  public Result<List<PendingReviewTaskDto>> getPendingTasks() {
+    List<PendingReviewTaskDto> tasks = reviewService.getPendingTasksForCurrentUser();
     return Result.ok(tasks);
+  }
+
+  /**
+   * 获取当前用户的评审历史（里程碑评审 + 立项审批）
+   * userId从JWT Token中提取，不接受客户端参数
+   */
+  @GetMapping("/my-records")
+  public Result<List<ReviewRecordDto>> getMyReviewRecords() {
+    List<ReviewRecordDto> records = reviewService.getMyReviewRecordsForCurrentUser();
+    return Result.ok(records);
   }
 }
