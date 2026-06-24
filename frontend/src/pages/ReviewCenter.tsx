@@ -8,7 +8,7 @@ import { ClipboardList, Clock, CheckCircle, AlertCircle, ArrowRight, Loader2, Fi
 import api from '../lib/api';
 
 interface PendingReviewTask {
-  id: number;
+  taskId: number;
   reviewApprovalId: number;
   projectId: number;
   projectName: string;
@@ -17,7 +17,6 @@ interface PendingReviewTask {
   milestoneCode: string;
   submitterName: string;
   submittedAt: string;
-  taskId: number;
   approverRole: string;
   reviewType: string;
 }
@@ -58,11 +57,25 @@ const ReviewCenter: React.FC = () => {
   const [loadingPending, setLoadingPending] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  // 加载待办评审
+  // 获取当前用户ID
+  const getUserId = (): number | null => {
+    const token = localStorage.getItem('token');
+    if (!token) return null;
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return payload.id || null;
+    } catch {
+      return null;
+    }
+  };
+
+  // 加载待办评审（里程碑评审 + 立项审批）
   const loadPendingTasks = async () => {
     setLoadingPending(true);
     try {
-      const res = await api.get('/api/reviews/my-tasks');
+      const userId = getUserId();
+      if (!userId) return;
+      const res = await api.get('/api/reviews/pending-tasks', { params: { userId } });
       const result = res.data as { code: number; data: PendingReviewTask[]; message?: string };
       if (result.code === 200 || result.code === 0) {
         setPendingTasks(result.data || []);
@@ -78,7 +91,9 @@ const ReviewCenter: React.FC = () => {
   const loadHistory = async () => {
     setLoadingHistory(true);
     try {
-      const res = await api.get('/api/reviews/my-records');
+      const userId = getUserId();
+      if (!userId) return;
+      const res = await api.get('/api/reviews/my-records', { params: { userId } });
       const result = res.data as { code: number; data: ReviewHistoryItem[]; message?: string };
       if (result.code === 200 || result.code === 0) {
         setHistoryRecords(result.data || []);
@@ -98,7 +113,8 @@ const ReviewCenter: React.FC = () => {
   // 点击待办评审，跳转到审批页面
   const handleTaskClick = (task: PendingReviewTask) => {
     if (task.reviewType === 'INITIATION') {
-      navigate(`/project/${task.projectId}/approval`);
+      // 立项审批 - 跳转到项目详情页并自动打开立项申请弹窗
+      navigate(`/project/${task.projectId}?tab=overview&openInitiation=true`);
     } else {
       // 里程碑评审 - 跳转到项目详情的里程碑控制台
       navigate(`/project/${task.projectId}?tab=milestone`);

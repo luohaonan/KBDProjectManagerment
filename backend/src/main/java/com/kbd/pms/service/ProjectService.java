@@ -407,6 +407,11 @@ public class ProjectService {
         .filter(m -> m.getStatus() == Enums.ProjectMilestoneStatus.SUBMITTED)
         .count();
 
+    // Count pending initiation approvals - projects with submitted initiation status
+    int pendingInitiationReviews = (int) allProjects.stream()
+        .filter(p -> "SUBMITTED".equals(p.getInitiationStatus()))
+        .count();
+
     // Count budget alerts - projects where utilization ratio > 80%
     int budgetAlerts = (int) allProjects.stream()
         .filter(p -> {
@@ -415,7 +420,7 @@ public class ProjectService {
         })
         .count();
 
-    return new DashboardStats(inProgressProjects, pendingMilestoneReviews, budgetAlerts);
+    return new DashboardStats(inProgressProjects, pendingMilestoneReviews, pendingInitiationReviews, budgetAlerts);
   }
 
   public ProjectDetailResponse getProjectDetail(long id, String username) {

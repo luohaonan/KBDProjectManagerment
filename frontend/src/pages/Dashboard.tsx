@@ -25,6 +25,7 @@ interface Project {
 interface DashboardStats {
   inProgressProjects: number;
   pendingMilestoneReviews: number;
+  pendingInitiationReviews: number;
   budgetAlerts: number;
 }
 
@@ -305,17 +306,25 @@ const Dashboard: React.FC = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {stats && stats.pendingMilestoneReviews > 0 ? (
-                <div className="mb-3 p-3 bg-slate-700 rounded">
-                  <div className="flex items-center mb-1">
-                    <Clock className="w-4 h-4 mr-2 text-blue-400" />
-                    <span className="text-sm font-semibold">待评审里程碑</span>
-                  </div>
-                  <p className="text-xs text-slate-400">共 {stats.pendingMilestoneReviews} 个待评审</p>
-                </div>
-              ) : (
-                <p className="text-slate-400">暂无待办评审</p>
-              )}
+              {(() => {
+                const totalPending = (stats?.pendingMilestoneReviews || 0) + (stats?.pendingInitiationReviews || 0);
+                if (totalPending > 0) {
+                  return (
+                    <div className="mb-3 p-3 bg-slate-700 rounded">
+                      <div className="flex items-center mb-1">
+                        <Clock className="w-4 h-4 mr-2 text-blue-400" />
+                        <span className="text-sm font-semibold">待办评审</span>
+                      </div>
+                      <p className="text-xs text-slate-400">
+                        共 {totalPending} 个待评审
+                        {stats!.pendingMilestoneReviews > 0 && <span>（里程碑 {stats!.pendingMilestoneReviews}个）</span>}
+                        {stats!.pendingInitiationReviews > 0 && <span>（立项 {stats!.pendingInitiationReviews}个）</span>}
+                      </p>
+                    </div>
+                  );
+                }
+                return <p className="text-slate-400">暂无待办评审</p>;
+              })()}
               <div className="mt-2 flex items-center text-xs text-blue-400">
                 <span>点击进入评审中心</span>
                 <ArrowRight className="w-3 h-3 ml-1" />

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Badge } from '../components/ui/badge';
@@ -73,11 +73,13 @@ interface ProjectData {
 const ProjectDetail: React.FC = () => {
   const { projectId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user, hasRole, hasPermission } = useAuth();
   const [project, setProject] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('overview');
+  // 从URL参数中读取 tab 和 openInitiation
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview');
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   // 立项申请相关状态
@@ -147,6 +149,13 @@ const ProjectDetail: React.FC = () => {
       })
       .finally(() => setLoading(false));
   }, [projectId]);
+
+  // 如果URL参数中有 openInitiation=true，自动打开立项申请弹窗
+  useEffect(() => {
+    if (searchParams.get('openInitiation') === 'true' && projectId && !loading && project) {
+      openInitiationDialog();
+    }
+  }, [searchParams, projectId, loading, project]);
 
   const openEditDialog = () => {
     if (!project) return;
@@ -587,12 +596,14 @@ const ProjectDetail: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-3">
-                <Button
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                  onClick={openEditDialog}
-                >
-                  编辑项目信息
-                </Button>
+                {hasRole('ROLE_PM') && (
+                  <Button
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={openEditDialog}
+                  >
+                    编辑项目信息
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   className="bg-slate-700 text-slate-100 border-slate-600"
@@ -604,9 +615,11 @@ const ProjectDetail: React.FC = () => {
                 <Button variant="outline" className="bg-slate-700 text-slate-100 border-slate-600">
                   下载报告
                 </Button>
-                <Button variant="outline" className="bg-slate-700 text-slate-100 border-slate-600" onClick={() => setActiveTab('change-request')}>
-                  项目变更
-                </Button>
+                {hasRole('ROLE_PM') && (
+                  <Button variant="outline" className="bg-slate-700 text-slate-100 border-slate-600" onClick={() => setActiveTab('change-request')}>
+                    项目变更
+                  </Button>
+                )}
                 {(hasRole('ROLE_PM') || canApproveInitiation) && (
                   <Button
                     className="bg-purple-600 hover:bg-purple-700 text-white"

@@ -1,5 +1,6 @@
 package com.kbd.pms.web;
 
+import com.kbd.pms.dto.PendingReviewTaskDto;
 import com.kbd.pms.dto.ReviewApprovalDto;
 import com.kbd.pms.dto.ReviewApprovalTaskDto;
 import com.kbd.pms.dto.ReviewDecisionRequest;
@@ -82,7 +83,7 @@ public class ReviewController {
   }
 
   /**
-   * 获取当前用户的审批任务（作为审批人）
+   * 获取当前用户的审批任务（作为审批人）- 仅里程碑评审
    */
   @GetMapping("/my-tasks")
   public Result<List<ReviewApprovalTaskDto>> getMyApprovalTasks(
@@ -91,11 +92,22 @@ public class ReviewController {
   }
 
   /**
-   * 获取当前用户提交的评审记录
+   * 获取当前用户提交的评审记录 - 仅里程碑评审
    */
   @GetMapping("/my-records")
   public Result<List<ReviewRecordDto>> getMyReviewRecords(
       @RequestParam("userId") long userId) {
     return Result.ok(reviewService.getMyReviewRecords(userId));
+  }
+
+  /**
+   * 获取统一待办任务列表（里程碑评审 + 立项审批）
+   * 这是评审中心前端使用的聚合接口
+   */
+  @GetMapping("/pending-tasks")
+  public Result<List<PendingReviewTaskDto>> getPendingTasks(
+      @RequestParam("userId") long userId) {
+    List<PendingReviewTaskDto> tasks = reviewService.getPendingTasks(userId);
+    return Result.ok(tasks);
   }
 }

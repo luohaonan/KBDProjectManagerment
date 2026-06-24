@@ -1,11 +1,16 @@
 package com.kbd.pms.service;
 
+import com.kbd.pms.dto.PendingReviewTaskDto;
 import com.kbd.pms.dto.ReviewApprovalDto;
 import com.kbd.pms.dto.ReviewApprovalTaskDto;
 import com.kbd.pms.dto.ReviewDecisionRequest;
 import com.kbd.pms.dto.ReviewRecordDto;
 import com.kbd.pms.dto.ReviewSubmitRequest;
 import com.kbd.pms.dto.SaveDraftRequest;
+import com.kbd.pms.entity.InitiationApprovalEntity;
+import com.kbd.pms.entity.InitiationApprovalTaskEntity;
+import com.kbd.pms.repository.InitiationApprovalRepository;
+import com.kbd.pms.repository.InitiationApprovalTaskRepository;
 import com.kbd.pms.entity.Enums;
 import com.kbd.pms.entity.IamUserEntity;
 import com.kbd.pms.entity.MilestoneDefEntity;
@@ -47,6 +52,8 @@ public class ReviewService {
   private final ReviewRecordRepository reviewRecordRepository;
   private final IamUserRepository iamUserRepository;
   private final GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository;
+  private final InitiationApprovalRepository initiationApprovalRepository;
+  private final InitiationApprovalTaskRepository initiationApprovalTaskRepository;
 
   public ReviewService(
       ProjectRepository projectRepository,
@@ -57,7 +64,9 @@ public class ReviewService {
       ReviewApprovalTaskRepository reviewApprovalTaskRepository,
       ReviewRecordRepository reviewRecordRepository,
       IamUserRepository iamUserRepository,
-      GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository) {
+      GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository,
+      InitiationApprovalRepository initiationApprovalRepository,
+      InitiationApprovalTaskRepository initiationApprovalTaskRepository) {
     this.projectRepository = projectRepository;
     this.projectMilestoneRepository = projectMilestoneRepository;
     this.milestoneDefRepository = milestoneDefRepository;
@@ -67,6 +76,8 @@ public class ReviewService {
     this.reviewRecordRepository = reviewRecordRepository;
     this.iamUserRepository = iamUserRepository;
     this.governanceCommitteeMemberRepository = governanceCommitteeMemberRepository;
+    this.initiationApprovalRepository = initiationApprovalRepository;
+    this.initiationApprovalTaskRepository = initiationApprovalTaskRepository;
   }
 
   // ==================== 公开 API ====================
@@ -380,6 +391,111 @@ public class ReviewService {
     List<ReviewRecordEntity> records =
         reviewRecordRepository.findByActorUserIdOrderByActionAtDesc(userId);
     return records.stream().map(this::toRecordDto).toList();
+  }
+
+  /**
+   * 获取统一待办任务列表（包含里程碑评审 + 立项审批）
+   * 为评审中心提供聚合数据
+   */
+  @Transactional(readOnly = true)
+  public List<PendingReviewTaskDto> getPendingTasks(long userId) {
+    List<PendingReviewTaskDto> result = new java.util.ArrayList<>();
+
+    // 1. 里程碑评审待办任务
+    List<ReviewApprovalTaskEntity> milestoneTasks =
+        reviewApprovalTaskRepository.findByApproverUserIdAndStatusOrderByCreatedAtDesc(
+            userId, ReviewApprovalTaskEntity.Status.PENDING);
+    for (ReviewApprovalTaskEntity task : milestoneTasks) {
+      try {
+        ReviewApprovalEntity approval = reviewApprovalRepository.findById(task.getReviewApprovalId()).orElse(null);
+        if (approval == null || approval.getStatus() != ReviewApprovalEntity.Status.SUBMITTED) continue;
+        ProjectEntity project = projectRepository.findById(approval.getProjectId()).orElse(null);
+        if (project == null) continue;
+
+        String milestoneName = "";
+        String milestoneCode = "";
+        ProjectMilestoneEntity pm = projectMilestoneRepository.findById(approval.getProjectMilestoneId()).orElse(null);
+        if (pm != null) {
+          MilestoneDefEntity def = milestoneDefRepository.findById(pm.getMilestoneId()).orElse(null);
+          if (def != null) {
+            milestoneName = def.getMilestoneName();
+            milestoneCode = def.getMilestoneCode();
+          }
+        }
+
+        String submitterName = approval.getSubmitterUserId() != null
+            ? iamUserRepository.findById(approval.getSubmitterUserId())
+                .map(IamUserEntity::getDisplayName).orElse(null)
+            : null;
+
+        result.add(new PendingReviewTaskDto(
+            task.getId(),
+            approval.getId(),
+            project.getId(),
+            project.getProjectName(),
+            project.getProjectCode(),
+            milestoneName,
+            milestoneCode,
+            submitterName,
+            approval.getSubmittedAt(),
+            task.getApproverRole(),
+            "MILESTONE"
+        ));
+      } catch (Exception e) {
+        // 跳过异常项，不阻塞整个列表
+      }
+    }
+
+    // 2. 立项审批待办任务
+    List<InitiationApprovalTaskEntity> initiationTasks =
+        initiationApprovalTaskRepository.findByApproverUserIdOrderByCreatedAtDesc(userId);
+    for (InitiationApprovalTaskEntity task : initiationTasks) {
+      try {
+        if (task.getStatus() != InitiationApprovalTaskEntity.Status.PENDING) continue;
+        InitiationApprovalEntity approval = initiationApprovalRepository.findById(task.getInitiationApprovalId()).orElse(null);
+        if (approval == null || approval.getStatus() != InitiationApprovalEntity.Status.SUBMITTED) continue;
+        ProjectEntity project = projectRepository.findById(approval.getProjectId()).orElse(null);
+        if (project == null) continue;
+
+        // 立项审批使用 G0 里程碑信息
+        MilestoneDefEntity g0Def = milestoneDefRepository.findAllByIsActiveTrueOrderBySortNoAsc().stream()
+            .filter(d -> "G0".equals(d.getMilestoneCode()))
+            .findFirst().orElse(null);
+        String milestoneName = g0Def != null ? g0Def.getMilestoneName() : "立项审批";
+        String milestoneCode = "G0";
+
+        String submitterName = approval.getSubmitterUserId() != null
+            ? iamUserRepository.findById(approval.getSubmitterUserId())
+                .map(IamUserEntity::getDisplayName).orElse(null)
+            : null;
+
+        result.add(new PendingReviewTaskDto(
+            task.getId(),
+            approval.getId(),
+            project.getId(),
+            project.getProjectName(),
+            project.getProjectCode(),
+            milestoneName,
+            milestoneCode,
+            submitterName,
+            approval.getSubmittedAt(),
+            task.getApproverRole(),
+            "INITIATION"
+        ));
+      } catch (Exception e) {
+        // 跳过异常项
+      }
+    }
+
+    // 按提交时间降序排序
+    result.sort((a, b) -> {
+      if (a.submittedAt() == null && b.submittedAt() == null) return 0;
+      if (a.submittedAt() == null) return 1;
+      if (b.submittedAt() == null) return -1;
+      return b.submittedAt().compareTo(a.submittedAt());
+    });
+
+    return result;
   }
 
   // ==================== 私有辅助方法 ====================
