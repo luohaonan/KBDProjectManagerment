@@ -8,6 +8,10 @@ public interface ReviewApprovalTaskRepository extends JpaRepository<ReviewApprov
 
   List<ReviewApprovalTaskEntity> findByReviewApprovalIdOrderBySortOrderAsc(Long reviewApprovalId);
 
+  List<ReviewApprovalTaskEntity> findByReviewApprovalIdAndStepCode(Long reviewApprovalId, String stepCode);
+
+  List<ReviewApprovalTaskEntity> findByReviewApprovalIdAndStepCodeAndStatus(Long reviewApprovalId, String stepCode, ReviewApprovalTaskEntity.Status status);
+
   List<ReviewApprovalTaskEntity> findByApproverUserIdOrderByCreatedAtDesc(Long approverUserId);
 
   List<ReviewApprovalTaskEntity> findByApproverUserIdAndStatusOrderByCreatedAtDesc(Long approverUserId, ReviewApprovalTaskEntity.Status status);

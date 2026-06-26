@@ -42,7 +42,7 @@ public class ProjectTerminationTaskEntity {
   @Column(name = "updated_at", nullable = false)
   private Instant updatedAt;
 
-  protected ProjectTerminationTaskEntity() {}
+  public ProjectTerminationTaskEntity() {}
 
   public Long getId() {
     return id;

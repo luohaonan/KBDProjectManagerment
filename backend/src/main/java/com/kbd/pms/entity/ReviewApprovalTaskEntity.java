@@ -26,6 +26,12 @@ public class ReviewApprovalTaskEntity {
   @Column(name = "approver_role", length = 64)
   private String approverRole;
 
+  @Column(name = "step_code", length = 32)
+  private String stepCode;
+
+  @Column(name = "deliverable_slot_code", length = 64)
+  private String deliverableSlotCode;
+
   @Column(name = "sort_order", nullable = false)
   private Integer sortOrder = 0;
 
@@ -58,6 +64,10 @@ public class ReviewApprovalTaskEntity {
   public void setApproverUserId(Long approverUserId) { this.approverUserId = approverUserId; }
   public String getApproverRole() { return approverRole; }
   public void setApproverRole(String approverRole) { this.approverRole = approverRole; }
+  public String getStepCode() { return stepCode; }
+  public void setStepCode(String stepCode) { this.stepCode = stepCode; }
+  public String getDeliverableSlotCode() { return deliverableSlotCode; }
+  public void setDeliverableSlotCode(String deliverableSlotCode) { this.deliverableSlotCode = deliverableSlotCode; }
   public Integer getSortOrder() { return sortOrder; }
   public void setSortOrder(Integer sortOrder) { this.sortOrder = sortOrder; }
   public Status getStatus() { return status; }

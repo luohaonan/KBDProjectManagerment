@@ -41,6 +41,15 @@ const reviewTypeMap: Record<string, string> = {
   MILESTONE: '里程碑评审',
 };
 
+const stepNameMap: Record<string, string> = {
+  UPLOAD: '交付物上传',
+  DEPT_HEAD_APPROVE: '部门负责人审批',
+  PM_TECH_REVIEW: 'PM技术初评',
+  COMPLIANCE_OPINION: '合规意见',
+  PMC_DECISION: 'PMC决策',
+  PM_INTERNAL_REVIEW: 'PM内部评审',
+};
+
 const resultBadgeMap: Record<string, { label: string; color: string }> = {
   GO: { label: '通过 (Go)', color: 'bg-green-600' },
   CONDITIONAL_GO: { label: '有条件通过', color: 'bg-yellow-600' },
@@ -57,7 +66,6 @@ const ReviewCenter: React.FC = () => {
   const [loadingPending, setLoadingPending] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  // 加载待办评审（里程碑评审 + 立项审批）- 从JWT获取当前用户，无需传递userId
   const loadPendingTasks = async () => {
     setLoadingPending(true);
     try {
@@ -73,7 +81,6 @@ const ReviewCenter: React.FC = () => {
     }
   };
 
-  // 加载评审历史（里程碑评审 + 立项审批历史）- 从JWT获取当前用户
   const loadHistory = async () => {
     setLoadingHistory(true);
     try {
@@ -94,26 +101,34 @@ const ReviewCenter: React.FC = () => {
     loadHistory();
   }, []);
 
-  // 点击待办评审，跳转到审批页面
   const handleTaskClick = (task: PendingReviewTask) => {
     if (task.reviewType === 'INITIATION') {
-      // 立项审批 - 跳转到项目详情页并自动打开立项申请弹窗
       navigate(`/project/${task.projectId}?tab=overview&openInitiation=true`);
     } else {
-      // 里程碑评审 - 跳转到项目详情的里程碑控制台
-      navigate(`/project/${task.projectId}?tab=milestone`);
+      // 里程碑评审 - 跳转到项目详情里程碑控制台，并高亮审查步骤
+      navigate(`/project/${task.projectId}?tab=milestone&reviewTaskId=${task.taskId}`);
     }
   };
 
-  // 点击评审历史，跳转到里程碑控制台
   const handleHistoryClick = (item: ReviewHistoryItem) => {
     navigate(`/project/${item.projectId}?tab=milestone`);
+  };
+
+  // 解析approverRole为可读步骤名（兼容旧数据中的role和新stepCode）
+  const getStepDisplayName = (task: PendingReviewTask) => {
+    if (task.approverRole && stepNameMap[task.approverRole]) {
+      return stepNameMap[task.approverRole];
+    }
+    if (task.approverRole === 'ROLE_PMC') return 'PMC决策';
+    if (task.approverRole === 'ROLE_PM') return 'PM技术初评';
+    if (task.approverRole === 'ROLE_DEPT_HEAD') return '部门负责人审批';
+    if (task.approverRole === 'ROLE_COMPLIANCE') return '合规意见';
+    return task.approverRole || '待审批';
   };
 
   return (
     <div className="min-h-screen bg-slate-900 text-white">
       <div className="mx-auto w-full max-w-7xl px-6 py-6">
-        {/* 头部导航 */}
         <div className="mb-6 flex items-center gap-4">
           <Button
             variant="outline"
@@ -134,7 +149,6 @@ const ReviewCenter: React.FC = () => {
           </div>
         </div>
 
-        {/* 选项卡 */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6 bg-slate-800 border border-slate-600">
             <TabsTrigger
@@ -158,7 +172,6 @@ const ReviewCenter: React.FC = () => {
             </TabsTrigger>
           </TabsList>
 
-          {/* 待办评审列表 */}
           <TabsContent value="pending">
             <Card className="bg-slate-800 border-slate-600">
               <CardHeader>
@@ -182,7 +195,7 @@ const ReviewCenter: React.FC = () => {
                   <div className="space-y-4">
                     {pendingTasks.map((task) => (
                       <div
-                        key={task.taskId}
+                        key={`${task.taskId}-${task.reviewType}`}
                         className="p-4 bg-slate-700 rounded border border-slate-600 cursor-pointer hover:bg-slate-600 transition"
                         onClick={() => handleTaskClick(task)}
                       >
@@ -195,10 +208,18 @@ const ReviewCenter: React.FC = () => {
                             <Badge className="bg-blue-600 text-white text-xs">
                               {task.milestoneCode}
                             </Badge>
+                            <Badge className="bg-indigo-600 text-white text-xs">
+                              {task.milestoneName}
+                            </Badge>
                           </div>
-                          <Badge className="bg-yellow-600 text-white text-xs">
-                            {reviewTypeMap[task.reviewType] || task.reviewType}
-                          </Badge>
+                          <div className="flex items-center gap-2">
+                            <Badge className="bg-slate-500 text-white text-xs">
+                              {getStepDisplayName(task)}
+                            </Badge>
+                            <Badge className="bg-yellow-600 text-white text-xs">
+                              {reviewTypeMap[task.reviewType] || task.reviewType}
+                            </Badge>
+                          </div>
                         </div>
                         <div className="flex items-center justify-between">
                           <div className="text-sm text-slate-400">
@@ -221,7 +242,6 @@ const ReviewCenter: React.FC = () => {
             </Card>
           </TabsContent>
 
-          {/* 评审历史列表 */}
           <TabsContent value="history">
             <Card className="bg-slate-800 border-slate-600">
               <CardHeader>
@@ -243,9 +263,9 @@ const ReviewCenter: React.FC = () => {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {historyRecords.map((item) => (
+                    {historyRecords.map((item, idx) => (
                       <div
-                        key={item.id}
+                        key={`${item.id}-${idx}`}
                         className="p-4 bg-slate-700 rounded border border-slate-600 cursor-pointer hover:bg-slate-600 transition"
                         onClick={() => handleHistoryClick(item)}
                       >
@@ -255,11 +275,11 @@ const ReviewCenter: React.FC = () => {
                               {item.projectName}
                             </span>
                             <Badge className="bg-blue-600 text-white text-xs">
-                              {item.milestoneCode}
+                              {item.milestoneCode || '-'}
                             </Badge>
                           </div>
                           <Badge className={`${resultBadgeMap[item.result]?.color || 'bg-gray-600'} text-white text-xs`}>
-                            {resultBadgeMap[item.result]?.label || item.result}
+                            {resultBadgeMap[item.result]?.label || item.result || item.action}
                           </Badge>
                         </div>
                         <div className="text-sm text-slate-400">
@@ -268,7 +288,7 @@ const ReviewCenter: React.FC = () => {
                           <span>角色: {item.actorRole}</span>
                           <span className="mx-2">|</span>
                           <span>
-                            时间: {new Date(item.actionAt).toLocaleString('zh-CN')}
+                            时间: {item.actionAt ? new Date(item.actionAt).toLocaleString('zh-CN') : '-'}
                           </span>
                         </div>
                         {item.opinion && (

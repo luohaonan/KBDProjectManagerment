@@ -9,8 +9,8 @@ import com.kbd.pms.service.ProjectChangeRequestService;
 import com.kbd.pms.service.MilestoneService;
 import jakarta.validation.Valid;
 import java.util.List;
+import java.util.Map;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -30,36 +30,37 @@ public class ProjectChangeRequestController {
     this.milestoneService = milestoneService;
   }
 
+  /** PM发起项目变更申请 */
   @PostMapping("/change-requests")
   @ResponseStatus(HttpStatus.CREATED)
-  public Result<ProjectChangeRequestDto.ProjectChangeRequestResponse> createChangeRequest(
+  public Result<ProjectChangeRequestDto> createChangeRequest(
       @PathVariable("projectId") long projectId,
-      @Valid @RequestBody ProjectChangeRequestDto.ProjectChangeRequestCreateRequest request) {
-    return Result.ok(changeRequestService.createChangeRequest(projectId, request));
+      @Valid @RequestBody ProjectChangeRequestDto request) {
+    return Result.ok(changeRequestService.submitChange(projectId, request));
   }
 
+  /** 获取项目变更申请列表 */
   @GetMapping("/change-requests")
-  public Result<List<ProjectChangeRequestDto.ProjectChangeRequestResponse>> listChangeRequests(
+  public Result<List<ProjectChangeRequestDto>> listChangeRequests(
       @PathVariable("projectId") long projectId) {
-    return Result.ok(changeRequestService.listProjectChangeRequests(projectId));
+    return Result.ok(changeRequestService.getProjectChangeRequests(projectId));
   }
 
-  @PostMapping("/change-requests/{changeRequestId}/approve")
-  public Result<ProjectChangeRequestDto.ProjectChangeRequestResponse> approveChangeRequest(
+  /** 获取单个变更申请 */
+  @GetMapping("/change-requests/{changeRequestId}")
+  public Result<ProjectChangeRequestDto> getChangeRequest(
       @PathVariable("projectId") long projectId,
-      @PathVariable("changeRequestId") long changeRequestId,
-      @Valid @RequestBody ProjectChangeRequestDecisionRequest request,
-      Authentication authentication) {
-    return Result.ok(changeRequestService.approveChangeRequest(projectId, changeRequestId, request, authentication.getName()));
+      @PathVariable("changeRequestId") long changeRequestId) {
+    return Result.ok(changeRequestService.getChangeRequest(changeRequestId));
   }
 
-  @PostMapping("/change-requests/{changeRequestId}/reject")
-  public Result<ProjectChangeRequestDto.ProjectChangeRequestResponse> rejectChangeRequest(
+  /** 执行变更审批决策（效率管理部或PMC） */
+  @PostMapping("/change-requests/{changeRequestId}/decision")
+  public Result<ProjectChangeRequestDto> executeDecision(
       @PathVariable("projectId") long projectId,
       @PathVariable("changeRequestId") long changeRequestId,
-      @Valid @RequestBody ProjectChangeRequestDecisionRequest request,
-      Authentication authentication) {
-    return Result.ok(changeRequestService.rejectChangeRequest(projectId, changeRequestId, request, authentication.getName()));
+      @Valid @RequestBody ProjectChangeRequestDecisionRequest request) {
+    return Result.ok(changeRequestService.executeDecision(changeRequestId, request.actorUserId(), request));
   }
 
   @PatchMapping("/milestones/{milestoneId}/reschedule")
@@ -80,11 +81,16 @@ public class ProjectChangeRequestController {
     return Result.ok(null);
   }
 
+  /** PM发起项目终止（委托给ProjectTerminationController的逻辑，此处统一入口） */
   @PostMapping("/terminate")
-  public Result<ProjectChangeRequestDto.ProjectChangeRequestResponse> terminateProject(
+  public Result<?> terminateProject(
       @PathVariable("projectId") long projectId,
-      @Valid @RequestBody ProjectChangeRequestDto.ProjectChangeRequestCreateRequest request,
-      Authentication authentication) {
-    return Result.ok(changeRequestService.terminateProject(projectId, request, authentication.getName()));
+      @RequestBody Map<String, Object> body) {
+    long actorUserId = ((Number) body.get("actorUserId")).longValue();
+    String reason = (String) body.get("reason");
+    String attachmentUri = (String) body.get("attachmentUri");
+    return Result.ok(changeRequestService.submitChange(projectId,
+        new ProjectChangeRequestDto(null, projectId, null, "PAUSE_TERMINATE", reason, attachmentUri,
+            null, null, null, null, null, actorUserId, null, null, null, null, null, null, null, null, null, null, null)));
   }
 }

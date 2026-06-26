@@ -27,6 +27,9 @@ public class DocumentEntity {
   @Column(name = "milestone_phase", nullable = false)
   private Enums.MilestoneStage milestonePhase;
 
+  @Column(name = "deliverable_slot_code", length = 64)
+  private String deliverableSlotCode;
+
   @Column(name = "uploader", nullable = false)
   private Long uploader;
 
@@ -63,6 +66,9 @@ public class DocumentEntity {
 
   public Enums.MilestoneStage getMilestonePhase() { return milestonePhase; }
   public void setMilestonePhase(Enums.MilestoneStage milestonePhase) { this.milestonePhase = milestonePhase; }
+
+  public String getDeliverableSlotCode() { return deliverableSlotCode; }
+  public void setDeliverableSlotCode(String deliverableSlotCode) { this.deliverableSlotCode = deliverableSlotCode; }
 
   public Long getUploader() { return uploader; }
   public void setUploader(Long uploader) { this.uploader = uploader; }

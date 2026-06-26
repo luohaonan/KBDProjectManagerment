@@ -5,11 +5,12 @@ import jakarta.validation.constraints.NotNull;
 public record ProjectChangeRequestDecisionRequest(
     @NotNull Long actorUserId,
     @NotNull Decision decision,
-    String decisionText
+    String opinion
 ) {
 
   public enum Decision {
     APPROVE,
-    REJECT
+    REJECT,
+    CONDITIONAL_APPROVE
   }
 }

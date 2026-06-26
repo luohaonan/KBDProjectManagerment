@@ -24,6 +24,9 @@ public class ProjectChangeRequestEntity {
   @Column(name = "reason_text", nullable = false)
   private String reasonText;
 
+  @Column(name = "attachment_uri", length = 1024)
+  private String attachmentUri;
+
   @Lob
   @Column(name = "before_text")
   private String beforeText;
@@ -50,9 +53,17 @@ public class ProjectChangeRequestEntity {
   @Column(name = "requested_at", nullable = false)
   private LocalDateTime requestedAt;
 
-  @Enumerated(EnumType.STRING)
   @Column(name = "status", nullable = false, length = 16)
-  private Enums.ApprovalStatus status = Enums.ApprovalStatus.DRAFT;
+  private String status = "DRAFT";
+
+  @Column(name = "efficiency_approver_id")
+  private Long efficiencyApproverId;
+
+  @Column(name = "efficiency_opinion", columnDefinition = "TEXT")
+  private String efficiencyOpinion;
+
+  @Column(name = "efficiency_decided_at")
+  private LocalDateTime efficiencyDecidedAt;
 
   @Column(name = "wf_instance_id")
   private Long wfInstanceId;
@@ -107,6 +118,8 @@ public class ProjectChangeRequestEntity {
   public void setChangeType(Enums.ChangeType changeType) { this.changeType = changeType; }
   public String getReasonText() { return reasonText; }
   public void setReasonText(String reasonText) { this.reasonText = reasonText; }
+  public String getAttachmentUri() { return attachmentUri; }
+  public void setAttachmentUri(String attachmentUri) { this.attachmentUri = attachmentUri; }
   public String getBeforeText() { return beforeText; }
   public void setBeforeText(String beforeText) { this.beforeText = beforeText; }
   public String getAfterText() { return afterText; }
@@ -121,8 +134,14 @@ public class ProjectChangeRequestEntity {
   public void setRequestedBy(Long requestedBy) { this.requestedBy = requestedBy; }
   public LocalDateTime getRequestedAt() { return requestedAt; }
   public void setRequestedAt(LocalDateTime requestedAt) { this.requestedAt = requestedAt; }
-  public Enums.ApprovalStatus getStatus() { return status; }
-  public void setStatus(Enums.ApprovalStatus status) { this.status = status; }
+  public String getStatus() { return status; }
+  public void setStatus(String status) { this.status = status; }
+  public Long getEfficiencyApproverId() { return efficiencyApproverId; }
+  public void setEfficiencyApproverId(Long efficiencyApproverId) { this.efficiencyApproverId = efficiencyApproverId; }
+  public String getEfficiencyOpinion() { return efficiencyOpinion; }
+  public void setEfficiencyOpinion(String efficiencyOpinion) { this.efficiencyOpinion = efficiencyOpinion; }
+  public LocalDateTime getEfficiencyDecidedAt() { return efficiencyDecidedAt; }
+  public void setEfficiencyDecidedAt(LocalDateTime efficiencyDecidedAt) { this.efficiencyDecidedAt = efficiencyDecidedAt; }
   public Long getWfInstanceId() { return wfInstanceId; }
   public void setWfInstanceId(Long wfInstanceId) { this.wfInstanceId = wfInstanceId; }
   public Enums.PmcDecision getPmcDecision() { return pmcDecision; }

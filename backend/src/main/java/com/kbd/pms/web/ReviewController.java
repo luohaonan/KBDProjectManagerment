@@ -1,12 +1,15 @@
 package com.kbd.pms.web;
 
+import com.kbd.pms.dto.DeliverableUploadRequest;
 import com.kbd.pms.dto.PendingReviewTaskDto;
 import com.kbd.pms.dto.ReviewApprovalDto;
 import com.kbd.pms.dto.ReviewApprovalTaskDto;
 import com.kbd.pms.dto.ReviewDecisionRequest;
+import com.kbd.pms.dto.ReviewProgressResponse;
 import com.kbd.pms.dto.ReviewRecordDto;
 import com.kbd.pms.dto.ReviewSubmitRequest;
 import com.kbd.pms.dto.SaveDraftRequest;
+import com.kbd.pms.dto.StepApproveRequest;
 import com.kbd.pms.service.ReviewService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -29,6 +32,21 @@ public class ReviewController {
     this.reviewService = reviewService;
   }
 
+  // ==================== 交付物管理 ====================
+
+  /**
+   * 部门执行人上传交付物
+   */
+  @PostMapping("/{projectId}/deliverables/upload")
+  @ResponseStatus(HttpStatus.OK)
+  public Result<?> uploadDeliverable(
+      @PathVariable("projectId") long projectId,
+      @Valid @RequestBody DeliverableUploadRequest request) {
+    return Result.ok(reviewService.uploadDeliverable(projectId, request));
+  }
+
+  // ==================== 评审流程 ====================
+
   /**
    * 保存草稿
    */
@@ -41,7 +59,7 @@ public class ReviewController {
   }
 
   /**
-   * 提交评审申请
+   * 提交/发起评审申请（部门执行人）
    */
   @PostMapping("/{projectId}/submit")
   @ResponseStatus(HttpStatus.OK)
@@ -52,7 +70,18 @@ public class ReviewController {
   }
 
   /**
-   * 审批人执行决策（通过/驳回）
+   * 分步审批 - 部门负责人/PM技术初评/合规意见/PMC决策/PM内部评审
+   */
+  @PostMapping("/{projectId}/approve-step")
+  @ResponseStatus(HttpStatus.OK)
+  public Result<ReviewApprovalDto> approveStep(
+      @PathVariable("projectId") long projectId,
+      @Valid @RequestBody StepApproveRequest request) {
+    return Result.ok(reviewService.approveStep(projectId, request));
+  }
+
+  /**
+   * 审批人执行决策（兼容旧API，通过taskId）
    */
   @PostMapping("/{projectId}/tasks/{taskId}/decision")
   @ResponseStatus(HttpStatus.OK)
@@ -61,6 +90,17 @@ public class ReviewController {
       @PathVariable("taskId") long taskId,
       @Valid @RequestBody ReviewDecisionRequest request) {
     return Result.ok(reviewService.executeDecision(projectId, taskId, request));
+  }
+
+  // ==================== 查询 ====================
+
+  /**
+   * 获取里程碑评审进度（含多步流程状态）
+   */
+  @GetMapping("/{projectId}/progress")
+  public Result<ReviewProgressResponse> getReviewProgress(
+      @PathVariable("projectId") long projectId) {
+    return Result.ok(reviewService.getReviewProgress(projectId));
   }
 
   /**
@@ -83,21 +123,17 @@ public class ReviewController {
 
   /**
    * 获取统一待办任务列表（里程碑评审 + 立项审批）
-   * userId从JWT Token中提取，不接受客户端参数
    */
   @GetMapping("/pending-tasks")
   public Result<List<PendingReviewTaskDto>> getPendingTasks() {
-    List<PendingReviewTaskDto> tasks = reviewService.getPendingTasksForCurrentUser();
-    return Result.ok(tasks);
+    return Result.ok(reviewService.getPendingTasksForCurrentUser());
   }
 
   /**
-   * 获取当前用户的评审历史（里程碑评审 + 立项审批）
-   * userId从JWT Token中提取，不接受客户端参数
+   * 获取当前用户的评审历史
    */
   @GetMapping("/my-records")
   public Result<List<ReviewRecordDto>> getMyReviewRecords() {
-    List<ReviewRecordDto> records = reviewService.getMyReviewRecordsForCurrentUser();
-    return Result.ok(records);
+    return Result.ok(reviewService.getMyReviewRecordsForCurrentUser());
   }
 }
