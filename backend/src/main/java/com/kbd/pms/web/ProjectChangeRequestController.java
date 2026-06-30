@@ -91,6 +91,6 @@ public class ProjectChangeRequestController {
     String attachmentUri = (String) body.get("attachmentUri");
     return Result.ok(changeRequestService.submitChange(projectId,
         new ProjectChangeRequestDto(null, projectId, null, "PAUSE_TERMINATE", reason, attachmentUri,
-            null, null, null, null, null, actorUserId, null, null, null, null, null, null, null, null, null, null, null)));
+            null, null, null, null, null, actorUserId, null, null, null, null, null, null, null, null, null, null, null, null)));
   }
 }

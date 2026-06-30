@@ -133,4 +133,4 @@ const DocumentList: React.FC<DocumentListProps> = ({ projectId, currentStage }) 
   );
 };
 
-export default DocumentList;
+export { DocumentList };

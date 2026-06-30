@@ -35,6 +35,17 @@ END //
 DELIMITER ;
 
 -- ============================================================
+-- 0. 修复 iam_user 表中用户的部门归属（dept_id 为 NULL 会导致部门校验失败）
+--    必须为所有用户设置正确的 dept_id 以匹配 org_department 和 user.department_id
+-- ============================================================
+UPDATE `iam_user` SET `dept_id` = 11 WHERE `id` = 2 AND `dept_id` IS NULL;  -- pm_user → 项目经理组
+UPDATE `iam_user` SET `dept_id` = 1  WHERE `id` = 3 AND `dept_id` IS NULL;  -- dept_head → 新药化学部
+UPDATE `iam_user` SET `dept_id` = 6  WHERE `id` = 4 AND `dept_id` IS NULL;  -- efficiency_user → 效率管理部
+UPDATE `iam_user` SET `dept_id` = 7  WHERE `id` = 5 AND `dept_id` IS NULL;  -- compliance_user → 药政合规部
+UPDATE `iam_user` SET `dept_id` = 10 WHERE `id` = 1 AND `dept_id` IS NULL;  -- pmc_user → PMC
+-- admin_user (id=6) 已有 dept_id=10，无需修改
+
+-- ============================================================
 -- 1. 为 review_approval_task 添加 step_code 字段
 -- ============================================================
 CALL add_column_if_not_exists('review_approval_task', 'step_code',
@@ -73,9 +84,9 @@ SET @add_fk = IF(@fk_exists = 0,
     'SELECT "fk_change_efficiency_approver already exists"');
 PREPARE stmt FROM @add_fk; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- 更新status枚举（使用 MODIFY COLUMN 覆盖）  
+-- 将 status 列从 enum 转换为 varchar（匹配 Entity 的 String 类型）
 ALTER TABLE `project_change_request`
-  MODIFY COLUMN `status` enum('DRAFT','SUBMITTED','EFFICIENCY_APPROVED','EFFICIENCY_REJECTED','PMC_APPROVED','PMC_REJECTED','APPROVED','REJECTED','CANCELLED') NOT NULL DEFAULT 'DRAFT';
+  MODIFY COLUMN `status` varchar(32) NOT NULL DEFAULT 'DRAFT' COMMENT '状态';
 
 -- ============================================================
 -- 4. 更新 project_termination_task 表的 status 枚举

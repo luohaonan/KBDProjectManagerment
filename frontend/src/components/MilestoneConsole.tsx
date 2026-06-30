@@ -63,7 +63,7 @@ interface MilestoneConsoleProps {
   reviewStatus?: string;
   /** 立项是否已全部审批通过 */
   initiationApproved?: boolean;
-  /** 是否允许上传核心交付物（新药资讯部 efficiency_user） */
+  /** 是否允许上传核心交付物（ROLE_DEPT_EXECUTOR 或 ADMIN 角色） */
   canUploadDeliverables?: boolean;
   onReview?: () => void;
 }
