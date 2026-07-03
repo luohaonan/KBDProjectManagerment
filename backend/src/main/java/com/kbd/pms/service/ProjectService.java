@@ -174,8 +174,18 @@ public class ProjectService {
     project.setPmUserId(request.pmUserId());
     project.setProcessOversightDeptId(oversightDept.getId());
     project.setCurrentMilestoneId(g0.getId());
-    // 业务阶段处于 G0「项目立项」；project.status 使用 ACTIVE 表示已正式纳入管线执行（与制度"立项后进入 G0"一致）
-    project.setStatus(Enums.ProjectStatus.ACTIVE);
+    // 判断是否为管理员（非PM）创建：如果创建者与项目经理不同，且项目信息不完整 -> DRAFT状态
+    boolean isAdminCreated = request.createdByUserId() != null
+        && request.pmUserId() != null
+        && !request.createdByUserId().equals(request.pmUserId())
+        && (request.indication() == null || request.indication().isEmpty());
+    if (isAdminCreated) {
+      // 管理员创建项目（仅基本信息），状态设为 DRAFT，等待 PM 完善
+      project.setStatus(Enums.ProjectStatus.DRAFT);
+    } else {
+      // PM 自己创建或有完整信息，直接 ACTIVE
+      project.setStatus(Enums.ProjectStatus.ACTIVE);
+    }
     project.setCreatedBy(request.createdByUserId());
     project.setUpdatedBy(request.createdByUserId());
     project.setCreatedAt(now);
@@ -244,6 +254,12 @@ public class ProjectService {
     project.setRiskCompetitive(request.riskCompetitive());
     project.setRiskRegulatory(request.riskRegulatory());
     project.setSuggestionAndSupport(request.suggestionAndSupport());
+    // 如果项目处于 DRAFT 状态且 PM 完善了信息（有 indication），自动转为 ACTIVE
+    if (project.getStatus() == Enums.ProjectStatus.DRAFT
+        && request.indication() != null
+        && !request.indication().isEmpty()) {
+      project.setStatus(Enums.ProjectStatus.ACTIVE);
+    }
     // 不更新 updated_by（外键引用 iam_user 表），仅更新 updated_at
     project.setUpdatedAt(Instant.now());
 
@@ -382,8 +398,8 @@ public class ProjectService {
     List<String> roles = userService.getUserRoles(username);
     List<ProjectEntity> projects;
 
-    if (roles.contains("ROLE_PMC") || roles.contains("ROLE_PM")) {
-      // PMC and PM can see all projects
+    if (roles.contains("ROLE_PMC") || roles.contains("ROLE_PM") || roles.contains("ROLE_PROJECT_ADMIN")) {
+      // PMC, PM and PROJECT_ADMIN can see all projects
       projects = projectRepository.findAll();
     } else {
       // Other users can only see projects they are involved in
@@ -420,7 +436,12 @@ public class ProjectService {
         })
         .count();
 
-    return new DashboardStats(inProgressProjects, pendingMilestoneReviews, pendingInitiationReviews, budgetAlerts);
+    // Count projects pending completion (DRAFT status - created by admin, need PM to fill in details)
+    int pendingProjectCompletions = (int) allProjects.stream()
+        .filter(p -> p.getStatus() == Enums.ProjectStatus.DRAFT)
+        .count();
+
+    return new DashboardStats(inProgressProjects, pendingMilestoneReviews, pendingInitiationReviews, budgetAlerts, pendingProjectCompletions);
   }
 
   public ProjectDetailResponse getProjectDetail(long id, String username) {

@@ -174,6 +174,33 @@ public class UserController {
     }
 
     /**
+     * 获取拥有指定角色的用户列表（用于下拉框选择项目经理等）
+     */
+    @GetMapping("/by-role")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Result<List<UserSimpleDto>>> listUsersByRole(@RequestParam("role") String roleName) {
+        List<User> users = userRepository.findActiveUsersByPermissionName(roleName);
+        // 如果按权限名找不到，尝试按角色名查找
+        if (users.isEmpty()) {
+            // 查找拥有指定角色的用户
+            List<User> allUsers = userRepository.findAll();
+            users = allUsers.stream()
+                .filter(u -> u.getRoles().stream().anyMatch(r -> r.getName().equals(roleName) || r.getName().equals("ROLE_" + roleName)))
+                .collect(Collectors.toList());
+        }
+        List<UserSimpleDto> dtos = users.stream()
+            .map(u -> {
+                UserSimpleDto dto = new UserSimpleDto();
+                dto.setId(u.getId());
+                dto.setUsername(u.getUsername());
+                dto.setEmail(u.getEmail());
+                return dto;
+            })
+            .collect(Collectors.toList());
+        return ResponseEntity.ok(Result.ok(dtos));
+    }
+
+    /**
      * 获取所有权限列表
      */
     @GetMapping("/permissions")
@@ -349,5 +376,18 @@ public class UserController {
         public void setDepartmentIds(List<Long> departmentIds) { this.departmentIds = departmentIds; }
         public List<String> getDepartmentNames() { return departmentNames; }
         public void setDepartmentNames(List<String> departmentNames) { this.departmentNames = departmentNames; }
+    }
+
+    public static class UserSimpleDto {
+        private Long id;
+        private String username;
+        private String email;
+
+        public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
+        public String getUsername() { return username; }
+        public void setUsername(String username) { this.username = username; }
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
     }
 }

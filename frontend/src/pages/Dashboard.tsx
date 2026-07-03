@@ -27,6 +27,7 @@ interface DashboardStats {
   pendingMilestoneReviews: number;
   pendingInitiationReviews: number;
   budgetAlerts: number;
+  pendingProjectCompletions: number;
 }
 
 const stages = [
@@ -294,7 +295,7 @@ const Dashboard: React.FC = () => {
             </CardContent>
           </Card>
 
-          {/* 评审中心 */}
+          {/* 待办事项 */}
           <Card
             className="bg-slate-800 border-slate-600 cursor-pointer hover:bg-slate-700 transition"
             onClick={() => navigate('/review-center')}
@@ -302,31 +303,32 @@ const Dashboard: React.FC = () => {
             <CardHeader>
               <CardTitle className="text-slate-100 flex items-center gap-2">
                 <ClipboardList className="w-5 h-5 text-blue-400" />
-                评审中心
+                待办事项
               </CardTitle>
             </CardHeader>
             <CardContent>
               {(() => {
-                const totalPending = (stats?.pendingMilestoneReviews || 0) + (stats?.pendingInitiationReviews || 0);
+                const totalPending = (stats?.pendingMilestoneReviews || 0) + (stats?.pendingInitiationReviews || 0) + (stats?.pendingProjectCompletions || 0);
                 if (totalPending > 0) {
                   return (
                     <div className="mb-3 p-3 bg-slate-700 rounded">
                       <div className="flex items-center mb-1">
                         <Clock className="w-4 h-4 mr-2 text-blue-400" />
-                        <span className="text-sm font-semibold">待办评审</span>
+                        <span className="text-sm font-semibold">待办任务</span>
                       </div>
                       <p className="text-xs text-slate-400">
-                        共 {totalPending} 个待评审
+                        共 {totalPending} 个待办
                         {stats!.pendingMilestoneReviews > 0 && <span>（里程碑 {stats!.pendingMilestoneReviews}个）</span>}
                         {stats!.pendingInitiationReviews > 0 && <span>（立项 {stats!.pendingInitiationReviews}个）</span>}
+                        {stats!.pendingProjectCompletions > 0 && <span>（项目完善 {stats!.pendingProjectCompletions}个）</span>}
                       </p>
                     </div>
                   );
                 }
-                return <p className="text-slate-400">暂无待办评审</p>;
+                return <p className="text-slate-400">暂无待办事项</p>;
               })()}
               <div className="mt-2 flex items-center text-xs text-blue-400">
-                <span>点击进入评审中心</span>
+                <span>点击进入待办事项</span>
                 <ArrowRight className="w-3 h-3 ml-1" />
               </div>
             </CardContent>

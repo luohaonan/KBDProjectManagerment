@@ -4,5 +4,6 @@ public record DashboardStats(
     int inProgressProjects,
     int pendingMilestoneReviews,
     int pendingInitiationReviews,
-    int budgetAlerts
+    int budgetAlerts,
+    int pendingProjectCompletions
 ) {}

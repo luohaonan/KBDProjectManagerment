@@ -141,10 +141,10 @@ const ReviewCenter: React.FC = () => {
           <div>
             <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2">
               <ClipboardList className="w-6 h-6 text-blue-400" />
-              评审中心
+              待办事项
             </h1>
             <p className="text-sm text-slate-400 mt-1">
-              查看和管理您的评审任务
+              查看和管理您的待办任务
             </p>
           </div>
         </div>
