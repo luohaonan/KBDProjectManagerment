@@ -39,6 +39,10 @@ import com.kbd.pms.repository.ProjectRepository;
 import com.kbd.pms.repository.ReviewApprovalRepository;
 import com.kbd.pms.repository.ReviewApprovalTaskRepository;
 import com.kbd.pms.repository.ReviewRecordRepository;
+import com.kbd.pms.repository.UserRepository;
+import com.kbd.pms.workflow.WfProcessDefinition;
+import com.kbd.pms.workflow.WfProcessNode;
+import com.kbd.pms.workflow.WfProcessService;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -86,6 +90,7 @@ public class ReviewService {
   private final InitiationApprovalRepository initiationApprovalRepository;
   private final InitiationApprovalTaskRepository initiationApprovalTaskRepository;
   private final SecurityHelper securityHelper;
+  private final WfProcessService wfProcessService;
 
   public ReviewService(
       ProjectRepository projectRepository,
@@ -102,7 +107,8 @@ public class ReviewService {
       GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository,
       InitiationApprovalRepository initiationApprovalRepository,
       InitiationApprovalTaskRepository initiationApprovalTaskRepository,
-      SecurityHelper securityHelper) {
+      SecurityHelper securityHelper,
+      WfProcessService wfProcessService) {
     this.projectRepository = projectRepository;
     this.projectMilestoneRepository = projectMilestoneRepository;
     this.milestoneDefRepository = milestoneDefRepository;
@@ -118,6 +124,7 @@ public class ReviewService {
     this.initiationApprovalRepository = initiationApprovalRepository;
     this.initiationApprovalTaskRepository = initiationApprovalTaskRepository;
     this.securityHelper = securityHelper;
+    this.wfProcessService = wfProcessService;
   }
 
   // ==================== 交付物上传 ====================
@@ -624,61 +631,15 @@ public class ReviewService {
 
   private void createMultiStepTasks(ProjectEntity project, ProjectMilestoneEntity pm,
       MilestoneDefEntity def, ReviewApprovalEntity approval) {
-    String milestoneCode = def.getMilestoneCode();
-    int sortBase = 0;
-
-    // Step 2: 部门负责人审批 (并行)
-    List<MilestoneDeptRoleEntity> deptHeadRoles = milestoneDeptRoleRepository
-        .findByMilestoneDefIdAndRoleTypeAndIsActiveTrue(def.getId(), "DEPT_HEAD");
-    if (!deptHeadRoles.isEmpty()) {
-      for (MilestoneDeptRoleEntity role : deptHeadRoles) {
-        // 查找该部门的负责人
-        OrgDepartmentEntity dept = orgDepartmentRepository.findById(role.getDeptId()).orElse(null);
-        if (dept != null && dept.getHeadUserId() != null) {
-          createTask(approval.getId(), dept.getHeadUserId(), "ROLE_DEPT_HEAD",
-              STEP_DEPT_HEAD_APPROVE, null, sortBase++);
-        }
-      }
-    }
-
-    // Step 3: PM技术初评
-    if (project.getPmUserId() != null) {
-      createTask(approval.getId(), project.getPmUserId(), "ROLE_PM",
-          STEP_PM_TECH_REVIEW, null, sortBase++);
-    }
-
-    // Step 4: 药政合规部合规意见 (G5/G9跳过)
-    if (!SKIP_COMPLIANCE_MILESTONES.contains(milestoneCode)) {
-      List<MilestoneDeptRoleEntity> complianceRoles = milestoneDeptRoleRepository
-          .findByMilestoneDefIdAndDeptIdAndIsActiveTrue(def.getId(), 7L); // dept_id=7 = 药政合规部
-      for (MilestoneDeptRoleEntity role : complianceRoles) {
-        if ("DEPT_HEAD".equals(role.getRoleType())) {
-          OrgDepartmentEntity dept = orgDepartmentRepository.findById(7L).orElse(null);
-          if (dept != null && dept.getHeadUserId() != null) {
-            createTask(approval.getId(), dept.getHeadUserId(), "ROLE_COMPLIANCE",
-                STEP_COMPLIANCE_OPINION, null, sortBase++);
-          }
-        }
-      }
-    }
-
-    // Step 5: PMC决策 或 PM项目组内部评审
-    if (PM_INTERNAL_REVIEW_MILESTONES.contains(milestoneCode)) {
-      // G1/G2: PM项目组内部评审
-      if (project.getPmUserId() != null) {
-        createTask(approval.getId(), project.getPmUserId(), "ROLE_PM",
-            STEP_PM_INTERNAL_REVIEW, null, sortBase++);
-      }
-    } else {
-      // 其他里程碑: PMC并行评审
-      if (project.getPmcCommitteeId() != null) {
-        List<Long> pmcMemberIds = governanceCommitteeMemberRepository
-            .findActiveMemberIds(project.getPmcCommitteeId(), LocalDate.now(ZoneOffset.UTC));
-        for (Long memberId : pmcMemberIds) {
-          createTask(approval.getId(), memberId, "ROLE_PMC",
-              STEP_PMC_DECISION, null, sortBase++);
-        }
-      }
+    try {
+      var processDef = wfProcessService.getActiveMilestoneProcess(def.getMilestoneCode());
+      List<ReviewApprovalTaskEntity> tasks =
+          wfProcessService.createMilestoneApprovalTasks(processDef, approval.getId(), project);
+      reviewApprovalTaskRepository.saveAll(tasks);
+    } catch (Exception e) {
+      // fallback: if workflow engine fails, log and continue
+      // the legacy hardcoded logic is removed — workflow engine is the single source of truth
+      throw new ApiException(500, "流程引擎创建审批任务失败: " + e.getMessage());
     }
   }
 

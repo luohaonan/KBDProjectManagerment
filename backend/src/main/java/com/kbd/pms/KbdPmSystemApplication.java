@@ -5,7 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 
 @SpringBootApplication
-@EntityScan(basePackages = "com.kbd.pms.entity")
+@EntityScan(basePackages = {"com.kbd.pms.entity", "com.kbd.pms.workflow"})
 public class KbdPmSystemApplication {
   public static void main(String[] args) {
     SpringApplication.run(KbdPmSystemApplication.class, args);
