@@ -1,0 +1,6 @@
+# Graphify output
+graphify-out/
+
+# Build output
+backend/target/
+frontend/node_modules/

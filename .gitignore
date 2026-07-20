@@ -1,0 +1,18 @@
+# Build output
+backend/target/
+frontend/node_modules/
+
+# Graphify analysis output
+graphify-out/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
