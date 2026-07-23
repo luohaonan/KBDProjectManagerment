@@ -61,8 +61,6 @@ interface MilestoneConsoleProps {
   currentUserId?: number;
   currentUserRoles?: string[];
   reviewStatus?: string;
-  /** 立项是否已全部审批通过 */
-  initiationApproved?: boolean;
   /** 是否允许上传核心交付物（ROLE_DEPT_EXECUTOR 或 ADMIN 角色） */
   canUploadDeliverables?: boolean;
   onReview?: () => void;
@@ -163,7 +161,6 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
   currentUserId,
   currentUserRoles = [],
   reviewStatus,
-  initiationApproved = false,
   canUploadDeliverables = false,
   onReview,
 }) => {
@@ -334,22 +331,10 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
     t => Number(t.approverUserId) === Number(currentUserId) && t.status === 'PENDING'
   );
 
-  const consoleEditable = initiationApproved;
-  const allowUpload = consoleEditable && canUploadDeliverables;
+  const allowUpload = canUploadDeliverables;
 
   return (
-    <div className={`space-y-6 ${!consoleEditable ? 'opacity-60' : ''}`}>
-      {!consoleEditable && (
-        <div className="p-4 bg-amber-900/30 border border-amber-700 rounded flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-amber-300 font-semibold">里程碑控制台暂不可用</p>
-            <p className="text-sm text-amber-200/80 mt-1">
-              需等待立项申请经全部审批人同意后，方可进行里程碑交付物上传与评审操作。
-            </p>
-          </div>
-        </div>
-      )}
+    <div className="space-y-6">
       {/* 阶段信息头 */}
       <Card className="bg-slate-800 border-slate-600">
         <CardHeader>
@@ -377,10 +362,10 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
       </Card>
 
       {/* 核心交付物清单 */}
-      <Card className={`bg-slate-800 border-slate-600 ${!consoleEditable ? 'pointer-events-none' : ''}`}>
+      <Card className="bg-slate-800 border-slate-600">
         <CardHeader>
           <CardTitle className="text-slate-100">核心交付物清单</CardTitle>
-          {consoleEditable && !canUploadDeliverables && (
+          {!canUploadDeliverables && (
             <p className="text-sm text-slate-400 mt-1">
               仅「新药资讯部」的 efficiency_user 账号可上传交付物
             </p>
@@ -462,7 +447,7 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
       </Card>
 
       {/* 评审操作 */}
-      <Card className={`bg-slate-800 border-slate-600 ${!consoleEditable ? 'pointer-events-none' : ''}`}>
+      <Card className="bg-slate-800 border-slate-600">
         <CardHeader>
           <CardTitle className="text-slate-100">评审操作</CardTitle>
         </CardHeader>
@@ -481,18 +466,14 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
             />
           </div>
 
-          {/* 操作按钮 - PM 角色 */}
+          {/* 操作按钮 - 部门执行人 */}
           <div className="flex gap-4">
-            {isPm && consoleEditable && !isUnderReview && !isApproved && (
+            {canUploadDeliverables && !isUnderReview && !isApproved && (
               <>
                 <Button
                   disabled={!allRequiredUploaded || submitting}
                   onClick={handleSubmitReview}
-                  className={`flex-1 ${
-                    allRequiredUploaded
-                      ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                      : 'bg-slate-600 text-slate-400 cursor-not-allowed'
-                  }`}
+                  className={`flex-1 ${allRequiredUploaded ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-slate-600 text-slate-400 cursor-not-allowed'}`}
                 >
                   {submitting ? (
                     <><Loader2 className="w-4 h-4 mr-2 animate-spin" />提交中...</>

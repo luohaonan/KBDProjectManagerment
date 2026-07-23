@@ -46,6 +46,8 @@ public record ProjectDetailResponse(
     /** 建议与所需支持：简述需要PMC提供的资源或决策支持 */
     String suggestionAndSupport,
     Long pmUserId,
+    /** 项目经理姓名（由后端查询 iam_user 表填充） */
+    String pmUserName,
     /** 数据库中的 workflow/生命周期状态枚举名（DRAFT/ACTIVE/...） */
     String projectStatus,
     /**

@@ -1,6 +1,9 @@
 package com.kbd.pms.workflow;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.BatchSize;
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
 import java.time.Instant;
 import java.util.*;
 
@@ -26,9 +29,11 @@ public class WfProcessDefinition {
 
     @OneToMany(mappedBy = "processDefinition", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("sortOrder ASC")
+    @BatchSize(size = 50)
     private List<WfProcessNode> nodes = new ArrayList<>();
 
     @OneToMany(mappedBy = "processDefinition", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
+    @BatchSize(size = 50)
     private Set<WfProcessEdge> edges = new HashSet<>();
 
     @Column(name = "created_at", nullable = false)

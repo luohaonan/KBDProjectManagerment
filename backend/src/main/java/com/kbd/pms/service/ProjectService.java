@@ -146,7 +146,7 @@ public class ProjectService {
     project.setLevelId(level.getId());
     project.setProjectCode(projectCode);
     project.setProjectName(request.projectName().trim());
-    project.setIndication(request.indication().trim());
+    project.setIndication(request.indication() == null ? null : request.indication().trim());
     project.setTargetPathway(
         request.targetPathway() == null ? null : request.targetPathway().trim());
     project.setTppSummary(request.tppSummary());
@@ -341,6 +341,11 @@ public class ProjectService {
 
     BudgetExecutionSummaryDto budgetDto = buildBudgetSummary(project.getId());
 
+    String pmUserName = project.getPmUserId() != null
+        ? iamUserRepository.findById(project.getPmUserId())
+            .map(IamUserEntity::getDisplayName).orElse(null)
+        : null;
+
     return new ProjectDetailResponse(
         project.getId(),
         project.getProjectCode(),
@@ -372,6 +377,7 @@ public class ProjectService {
         project.getRiskRegulatory(),
         project.getSuggestionAndSupport(),
         project.getPmUserId(),
+        pmUserName,
         project.getStatus().name(),
         lifecyclePhaseLabel,
         project.getInitiationStatus(),
@@ -493,6 +499,11 @@ public class ProjectService {
 
     BudgetExecutionSummaryDto budgetDto = buildBudgetSummary(project.getId());
 
+    String pmUserName = project.getPmUserId() != null
+        ? iamUserRepository.findById(project.getPmUserId())
+            .map(IamUserEntity::getDisplayName).orElse(null)
+        : null;
+
     return new ProjectDetailResponse(
         project.getId(),
         project.getProjectCode(),
@@ -524,6 +535,7 @@ public class ProjectService {
         project.getRiskRegulatory(),
         project.getSuggestionAndSupport(),
         project.getPmUserId(),
+        pmUserName,
         project.getStatus().name(),
         lifecyclePhaseLabel,
         project.getInitiationStatus(),

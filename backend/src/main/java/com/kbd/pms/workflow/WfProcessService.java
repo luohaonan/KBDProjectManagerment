@@ -3,6 +3,8 @@ package com.kbd.pms.workflow;
 import com.kbd.pms.entity.*;
 import com.kbd.pms.exception.ApiException;
 import com.kbd.pms.repository.*;
+import jakarta.persistence.EntityManager;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +25,7 @@ public class WfProcessService {
     private final GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository;
     private final ProjectRepository projectRepository;
     private final RoleRepository roleRepository;
+    private final EntityManager entityManager;
 
     public WfProcessService(
             WfProcessRepository processRepository,
@@ -31,7 +34,8 @@ public class WfProcessService {
             IamUserRepository iamUserRepository,
             GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository,
             ProjectRepository projectRepository,
-            RoleRepository roleRepository) {
+            RoleRepository roleRepository,
+            EntityManager entityManager) {
         this.processRepository = processRepository;
         this.userRepository = userRepository;
         this.orgDepartmentRepository = orgDepartmentRepository;
@@ -39,6 +43,7 @@ public class WfProcessService {
         this.governanceCommitteeMemberRepository = governanceCommitteeMemberRepository;
         this.projectRepository = projectRepository;
         this.roleRepository = roleRepository;
+        this.entityManager = entityManager;
     }
 
     // ==================== 流程定义查询 ====================
@@ -50,7 +55,7 @@ public class WfProcessService {
 
     @Transactional(readOnly = true)
     public List<WfProcessDefinition> listProcessesByType(String processType) {
-        return processRepository.findByProcessType(processType);
+        return processRepository.findByProcessType(processType, Sort.by(Sort.Direction.ASC, "milestoneCode"));
     }
 
     @Transactional(readOnly = true)
@@ -97,42 +102,103 @@ public class WfProcessService {
 
     @Transactional
     public WfProcessDefinition updateProcess(Long id, WfProcessDefinition updated) {
+        // ================================================================
+        // 策略：使用 JPA 集合清理（orphanRemoval + clear），
+        // 避免原生 SQL 删除可能产生的缓存不一致问题
+        // ================================================================
+
+        System.out.println("========== [WfProcessService.updateProcess] START ==========");
+        System.out.println("[SVC] 传入 processId=" + id);
+        System.out.println("[SVC] 传入 updated.nodes 数量=" + (updated.getNodes() != null ? updated.getNodes().size() : 0));
+        System.out.println("[SVC] 传入 updated.edges 数量=" + (updated.getEdges() != null ? updated.getEdges().size() : 0));
+
         WfProcessDefinition existing = getProcessDefinition(id);
+
+        // 打印清理前的状态
+        System.out.println("[SVC] 清理前 existing.nodes 数量=" + existing.getNodes().size());
+        for (var n : existing.getNodes()) {
+            System.out.println("[SVC]   旧 node: id=" + n.getId() + ", code=" + n.getNodeCode() + ", name=" + n.getNodeName());
+        }
+        System.out.println("[SVC] 清理前 existing.edges 数量=" + existing.getEdges().size());
+        for (var e : existing.getEdges()) {
+            System.out.println("[SVC]   旧 edge: id=" + e.getId() + ", " + e.getFromNode().getNodeCode() + "(" + e.getFromNode().getId() + ") -> " + e.getToNode().getNodeCode() + "(" + e.getToNode().getId() + ")");
+        }
+
         existing.setDescription(updated.getDescription());
         existing.setIsActive(updated.getIsActive());
         existing.setUpdatedAt(Instant.now());
 
-        existing.getNodes().clear();
+        // 1) 先清理旧 edges（FK 指向 wf_process_node，必须先删）
         existing.getEdges().clear();
+        System.out.println("[SVC] 步骤1: edges.clear() 后 edges 数量=" + existing.getEdges().size());
 
+        // 2) 再清理旧 nodes（orphanRemoval=true → DELETE 旧行）
+        existing.getNodes().clear();
+        System.out.println("[SVC] 步骤2: nodes.clear() 后 nodes 数量=" + existing.getNodes().size());
+
+        // 3) flush 确保 DELETE 已发送到 DB
+        entityManager.flush();
+        System.out.println("[SVC] 步骤3: flush() 完成");
+
+        // 4) 插入新节点（id=null → INSERT），flush 获取自增 ID
         if (updated.getNodes() != null) {
             for (WfProcessNode node : updated.getNodes()) {
+                node.setId(null);
                 node.setProcessDefinition(existing);
                 node.setCreatedAt(Instant.now());
                 node.setUpdatedAt(Instant.now());
                 existing.getNodes().add(node);
             }
+            System.out.println("[SVC] 步骤4: 已添加 " + updated.getNodes().size() + " 个新节点到 existing");
+            entityManager.flush();
+            System.out.println("[SVC] 步骤4: flush() 后，existing.nodes 数量=" + existing.getNodes().size());
+            for (var n : existing.getNodes()) {
+                System.out.println("[SVC]   新 node: id=" + n.getId() + ", code=" + n.getNodeCode() + ", name=" + n.getNodeName());
+            }
         }
-        if (updated.getEdges() != null) {
-            Map<String, WfProcessNode> nodeByCode = new HashMap<>();
+
+        // 5) 插入新连线（关联步骤4生成的 DB ID）
+        if (updated.getEdges() != null && !existing.getNodes().isEmpty()) {
+            Map<String, WfProcessNode> nodeByCode = new LinkedHashMap<>();
             for (WfProcessNode node : existing.getNodes()) {
-                if (node.getNodeCode() != null) nodeByCode.put(node.getNodeCode(), node);
-            }
-            for (WfProcessEdge edge : updated.getEdges()) {
-                if (edge.getFromNode() != null && edge.getToNode() != null) {
-                    WfProcessNode fromNode = nodeByCode.get(edge.getFromNode().getNodeCode());
-                    WfProcessNode toNode = nodeByCode.get(edge.getToNode().getNodeCode());
-                    if (fromNode != null && toNode != null) {
-                        edge.setFromNode(fromNode);
-                        edge.setToNode(toNode);
-                    }
+                if (node.getNodeCode() != null) {
+                    nodeByCode.put(node.getNodeCode(), node);
                 }
-                edge.setProcessDefinition(existing);
-                edge.setCreatedAt(Instant.now());
-                existing.getEdges().add(edge);
             }
+            System.out.println("[SVC] 步骤5: nodeByCode 包含 " + nodeByCode.size() + " 个映射");
+            for (var entry : nodeByCode.entrySet()) {
+                System.out.println("[SVC]   " + entry.getKey() + " -> node.id=" + entry.getValue().getId());
+            }
+
+            int edgeAdded = 0;
+            int edgeSkipped = 0;
+            for (WfProcessEdge edge : updated.getEdges()) {
+                WfProcessNode fromNode = edge.getFromNode() != null
+                        ? nodeByCode.get(edge.getFromNode().getNodeCode()) : null;
+                WfProcessNode toNode = edge.getToNode() != null
+                        ? nodeByCode.get(edge.getToNode().getNodeCode()) : null;
+                if (fromNode != null && toNode != null) {
+                    edge.setId(null);
+                    edge.setFromNode(fromNode);
+                    edge.setToNode(toNode);
+                    edge.setProcessDefinition(existing);
+                    edge.setCreatedAt(Instant.now());
+                    existing.getEdges().add(edge);
+                    edgeAdded++;
+                } else {
+                    edgeSkipped++;
+                    System.out.println("[SVC] ⚠ 跳过边: fromCode=" + (edge.getFromNode() != null ? edge.getFromNode().getNodeCode() : "null") + ", toCode=" + (edge.getToNode() != null ? edge.getToNode().getNodeCode() : "null") + " (fromNode=" + (fromNode != null) + ", toNode=" + (toNode != null) + ")");
+                }
+            }
+            System.out.println("[SVC] 步骤5: 添加了 " + edgeAdded + " 条边, 跳过了 " + edgeSkipped + " 条边");
         }
-        return processRepository.save(existing);
+
+        WfProcessDefinition saved = processRepository.save(existing);
+        System.out.println("[SVC] save() 后 saved.nodes 数量=" + (saved.getNodes() != null ? saved.getNodes().size() : 0));
+        System.out.println("[SVC] save() 后 saved.edges 数量=" + (saved.getEdges() != null ? saved.getEdges().size() : 0));
+        System.out.println("========== [WfProcessService.updateProcess] END ==========");
+
+        return saved;
     }
 
     @Transactional
@@ -143,9 +209,6 @@ public class WfProcessService {
 
     // ==================== 流程执行引擎 ====================
 
-    /**
-     * 获取流程的后继节点
-     */
     public Map<Long, List<WfProcessNode>> buildAdjacencyMap(WfProcessDefinition def) {
         Map<Long, List<WfProcessNode>> adj = new LinkedHashMap<>();
         Map<Long, WfProcessNode> nodeMap = def.getNodes().stream()
@@ -157,9 +220,6 @@ public class WfProcessService {
         return adj;
     }
 
-    /**
-     * 查找起始节点（无入边）
-     */
     public List<WfProcessNode> findStartNodes(WfProcessDefinition def) {
         Set<Long> targetNodeIds = def.getEdges().stream().map(e -> e.getToNode().getId()).collect(Collectors.toSet());
         return def.getNodes().stream()
@@ -168,10 +228,6 @@ public class WfProcessService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * 按拓扑顺序获取所有非上传节点（审批节点），每条边的一对节点(stepCode, sortOrder)映射
-     * 返回有序列表，保证 DAG 拓扑序
-     */
     public List<WfProcessNode> getApprovalNodesInOrder(WfProcessDefinition def) {
         Set<Long> visited = new HashSet<>();
         List<WfProcessNode> result = new ArrayList<>();
@@ -182,7 +238,6 @@ public class WfProcessService {
         while (!queue.isEmpty()) {
             WfProcessNode node = queue.poll();
             if (!visited.add(node.getId())) continue;
-            // 跳过上传节点（is_uploader=true），但它们的后继仍需入队
             if (!Boolean.TRUE.equals(node.getIsUploader())) {
                 result.add(node);
             }
@@ -194,24 +249,11 @@ public class WfProcessService {
         return result;
     }
 
-    /**
-     * 为里程碑流程创建审批任务链
-     * @return 创建的 ReviewApprovalTaskEntity 列表（调用方需自行保存）
-     */
     public List<ReviewApprovalTaskEntity> createMilestoneApprovalTasks(
             WfProcessDefinition def, Long approvalId, ProjectEntity project) {
 
         List<ReviewApprovalTaskEntity> tasks = new ArrayList<>();
         List<WfProcessNode> approvalNodes = getApprovalNodesInOrder(def);
-
-        Map<Long, Long> inDegree = new HashMap<>();
-        for (WfProcessEdge edge : def.getEdges()) {
-            inDegree.merge(edge.getToNode().getId(), 1L, Long::sum);
-        }
-        Map<Long, List<WfProcessEdge>> outgoing = new HashMap<>();
-        for (WfProcessEdge edge : def.getEdges()) {
-            outgoing.computeIfAbsent(edge.getFromNode().getId(), k -> new ArrayList<>()).add(edge);
-        }
 
         int sortOrder = 0;
         for (WfProcessNode node : approvalNodes) {
@@ -251,9 +293,6 @@ public class WfProcessService {
         };
     }
 
-    /**
-     * 解析审批人为具体用户ID列表
-     */
     public List<Long> resolveApprovers(WfProcessNode node, ProjectEntity project) {
         if (node.getApproverRule() == null) return Collections.emptyList();
         List<Long> ids = new ArrayList<>();
@@ -263,7 +302,6 @@ public class WfProcessService {
                 if (project != null && project.getPmUserId() != null) ids.add(project.getPmUserId());
                 break;
             case "ROLE_PMC":
-                // 从 PMC 委员会获取所有活跃成员
                 if (project != null && project.getPmcCommitteeId() != null) {
                     List<Long> pmcIds = governanceCommitteeMemberRepository
                             .findActiveMemberIds(project.getPmcCommitteeId(), LocalDate.now(ZoneOffset.UTC));

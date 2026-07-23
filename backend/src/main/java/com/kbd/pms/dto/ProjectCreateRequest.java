@@ -12,7 +12,7 @@ public record ProjectCreateRequest(
     @NotBlank @Size(max = 256) String projectName,
     /** 项目分级代号，如 H-L、G-L（对应 project_level.level_code） */
     @NotBlank @Size(max = 8) String levelCode,
-    @NotBlank @Size(max = 256) String indication,
+    @Size(max = 256) String indication,
     @Size(max = 256) String targetPathway,
     String tppSummary,
     String description,

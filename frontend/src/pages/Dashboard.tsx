@@ -9,6 +9,7 @@ import api from '../lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 
+
 interface Project {
   id: number;
   projectCode: string;
@@ -41,7 +42,7 @@ const stageColors = [
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { hasPermission } = useAuth();
+  const { hasPermission, hasRole } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [filterLevel, setFilterLevel] = useState<string>('all');
@@ -320,7 +321,7 @@ const Dashboard: React.FC = () => {
                         共 {totalPending} 个待办
                         {stats!.pendingMilestoneReviews > 0 && <span>（里程碑 {stats!.pendingMilestoneReviews}个）</span>}
                         {stats!.pendingInitiationReviews > 0 && <span>（立项 {stats!.pendingInitiationReviews}个）</span>}
-                        {stats!.pendingProjectCompletions > 0 && <span>（项目完善 {stats!.pendingProjectCompletions}个）</span>}
+                        {hasRole('ROLE_PM') && stats!.pendingProjectCompletions > 0 && <span>（项目完善 {stats!.pendingProjectCompletions}个）</span>}
                       </p>
                     </div>
                   );
@@ -354,10 +355,12 @@ const Dashboard: React.FC = () => {
                 <SelectItem value="C-Q">C-Q</SelectItem>
               </SelectContent>
             </Select>
-            <Button onClick={handleCreateProject} className="bg-green-600 hover:bg-green-700">
-              <Plus className="w-4 h-4 mr-2" />
-              创建新项目
-            </Button>
+            {(hasRole('ROLE_ADMIN') || hasRole('ROLE_PROJECT_ADMIN')) && (
+              <Button onClick={handleCreateProject} className="bg-green-600 hover:bg-green-700">
+                <Plus className="w-4 h-4 mr-2" />
+                创建新项目
+              </Button>
+            )}
             <Button onClick={handleViewStats} className="bg-blue-600 hover:bg-blue-700">
               <BarChart3 className="w-4 h-4 mr-2" />
               查看统计

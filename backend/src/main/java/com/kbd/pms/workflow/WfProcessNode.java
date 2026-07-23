@@ -57,6 +57,7 @@ public class WfProcessNode {
     public WfProcessNode() {}
 
     public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
     public WfProcessDefinition getProcessDefinition() { return processDefinition; }
     public void setProcessDefinition(WfProcessDefinition processDefinition) { this.processDefinition = processDefinition; }
     public String getNodeCode() { return nodeCode; }

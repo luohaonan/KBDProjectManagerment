@@ -4,6 +4,7 @@ import com.kbd.pms.dto.InitiationReportResponse;
 import com.kbd.pms.dto.ProjectCreateRequest;
 import com.kbd.pms.dto.ProjectDetailResponse;
 import com.kbd.pms.dto.ProjectUpdateRequest;
+import com.kbd.pms.service.PdfReportService;
 import com.kbd.pms.service.ProjectService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
@@ -13,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -21,9 +23,11 @@ import java.util.List;
 public class ProjectController {
 
   private final ProjectService projectService;
+  private final PdfReportService pdfReportService;
 
-  public ProjectController(ProjectService projectService) {
+  public ProjectController(ProjectService projectService, PdfReportService pdfReportService) {
     this.projectService = projectService;
+    this.pdfReportService = pdfReportService;
   }
 
   @GetMapping
@@ -60,6 +64,25 @@ public class ProjectController {
   @GetMapping("/{id}/initiation-report")
   public Result<InitiationReportResponse> getInitiationReport(@PathVariable("id") long id) {
     return Result.ok(projectService.getInitiationReport(id));
+  }
+
+  /**
+   * 下载立项报告 PDF（服务端生成，文字可直接复制）
+   */
+  @GetMapping("/{id}/initiation-report/pdf")
+  public ResponseEntity<byte[]> downloadInitiationReportPdf(@PathVariable("id") long id) {
+    try {
+      byte[] pdfBytes = pdfReportService.generateInitiationReportPdf(id);
+      HttpHeaders headers = new HttpHeaders();
+      headers.setContentType(MediaType.APPLICATION_PDF);
+      headers.setContentDispositionFormData("attachment",
+          "initiation_report_" + id + ".pdf");
+      return ResponseEntity.ok().headers(headers).body(pdfBytes);
+    } catch (IllegalArgumentException e) {
+      return ResponseEntity.notFound().build();
+    } catch (IOException e) {
+      return ResponseEntity.internalServerError().build();
+    }
   }
 
   @DeleteMapping("/{id}")
