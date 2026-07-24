@@ -37,6 +37,12 @@ import com.kbd.pms.repository.ProjectTeamMemberRepository;
 import com.kbd.pms.repository.ProjectTerminationTaskRepository;
 import com.kbd.pms.repository.ReviewApprovalRepository;
 import com.kbd.pms.repository.ReviewRecordRepository;
+import com.kbd.pms.repository.ReviewApprovalTaskRepository;
+import com.kbd.pms.repository.InitiationApprovalTaskRepository;
+import com.kbd.pms.repository.InitiationApprovalRepository;
+import com.kbd.pms.entity.ReviewApprovalTaskEntity;
+import com.kbd.pms.entity.InitiationApprovalTaskEntity;
+import com.kbd.pms.entity.InitiationApprovalEntity;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -67,6 +73,10 @@ public class ProjectService {
   private final ProjectTerminationTaskRepository projectTerminationTaskRepository;
   private final ReviewApprovalRepository reviewApprovalRepository;
   private final ReviewRecordRepository reviewRecordRepository;
+  private final ReviewApprovalTaskRepository reviewApprovalTaskRepository;
+  private final InitiationApprovalTaskRepository initiationApprovalTaskRepository;
+  private final InitiationApprovalRepository initiationApprovalRepository;
+  private final SecurityHelper securityHelper;
 
   public ProjectService(
       ProjectRepository projectRepository,
@@ -88,7 +98,11 @@ public class ProjectService {
       ProjectTeamMemberRepository projectTeamMemberRepository,
       ProjectTerminationTaskRepository projectTerminationTaskRepository,
       ReviewApprovalRepository reviewApprovalRepository,
-      ReviewRecordRepository reviewRecordRepository) {
+      ReviewRecordRepository reviewRecordRepository,
+      ReviewApprovalTaskRepository reviewApprovalTaskRepository,
+      InitiationApprovalTaskRepository initiationApprovalTaskRepository,
+      InitiationApprovalRepository initiationApprovalRepository,
+      SecurityHelper securityHelper) {
     this.projectRepository = projectRepository;
     this.projectLevelRepository = projectLevelRepository;
     this.milestoneDefRepository = milestoneDefRepository;
@@ -109,6 +123,10 @@ public class ProjectService {
     this.projectTerminationTaskRepository = projectTerminationTaskRepository;
     this.reviewApprovalRepository = reviewApprovalRepository;
     this.reviewRecordRepository = reviewRecordRepository;
+    this.reviewApprovalTaskRepository = reviewApprovalTaskRepository;
+    this.initiationApprovalTaskRepository = initiationApprovalTaskRepository;
+    this.initiationApprovalRepository = initiationApprovalRepository;
+    this.securityHelper = securityHelper;
   }
 
   @Transactional
@@ -419,19 +437,32 @@ public class ProjectService {
 
   public DashboardStats getDashboardStats() {
     List<ProjectEntity> allProjects = projectRepository.findAll();
+    long currentUserId = securityHelper.getCurrentUserId();
 
     int inProgressProjects = (int) allProjects.stream()
         .filter(p -> p.getStatus() == Enums.ProjectStatus.ACTIVE)
         .count();
 
-    // Count pending milestone reviews - projects with milestones in review status
-    int pendingMilestoneReviews = (int) projectMilestoneRepository.findAll().stream()
-        .filter(m -> m.getStatus() == Enums.ProjectMilestoneStatus.SUBMITTED)
+    // Count pending milestone reviews assigned to current user
+    int pendingMilestoneReviews = (int) reviewApprovalTaskRepository
+        .findByApproverUserIdAndStatusOrderByCreatedAtDesc(currentUserId, ReviewApprovalTaskEntity.Status.PENDING)
+        .stream()
+        .filter(task -> {
+          var approval = reviewApprovalRepository.findById(task.getReviewApprovalId()).orElse(null);
+          return approval != null && approval.getStatus() == com.kbd.pms.entity.ReviewApprovalEntity.Status.SUBMITTED;
+        })
         .count();
 
-    // Count pending initiation approvals - projects with submitted initiation status
-    int pendingInitiationReviews = (int) allProjects.stream()
-        .filter(p -> "SUBMITTED".equals(p.getInitiationStatus()))
+    // Count pending initiation approvals assigned to current user
+    int pendingInitiationReviews = (int) initiationApprovalTaskRepository
+        .findByApproverUserIdOrderByCreatedAtDesc(currentUserId)
+        .stream()
+        .filter(task -> task.getStatus() == InitiationApprovalTaskEntity.Status.PENDING)
+        .filter(task -> {
+          InitiationApprovalEntity approval = initiationApprovalRepository
+              .findById(task.getInitiationApprovalId()).orElse(null);
+          return approval != null && approval.getStatus() == InitiationApprovalEntity.Status.SUBMITTED;
+        })
         .count();
 
     // Count budget alerts - projects where utilization ratio > 80%
@@ -442,9 +473,11 @@ public class ProjectService {
         })
         .count();
 
-    // Count projects pending completion (DRAFT status - created by admin, need PM to fill in details)
+    // Count projects pending completion (DRAFT status where current user is the PM)
     int pendingProjectCompletions = (int) allProjects.stream()
-        .filter(p -> p.getStatus() == Enums.ProjectStatus.DRAFT)
+        .filter(p -> p.getStatus() == Enums.ProjectStatus.DRAFT
+            && p.getPmUserId() != null
+            && p.getPmUserId().longValue() == currentUserId)
         .count();
 
     return new DashboardStats(inProgressProjects, pendingMilestoneReviews, pendingInitiationReviews, budgetAlerts, pendingProjectCompletions);

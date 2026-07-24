@@ -31,4 +31,3 @@ public interface WfProcessRepository extends JpaRepository<WfProcessDefinition, 
     @EntityGraph(attributePaths = {"nodes"})
     List<WfProcessDefinition> findByProcessType(String processType, Sort sort);
 }
-}
