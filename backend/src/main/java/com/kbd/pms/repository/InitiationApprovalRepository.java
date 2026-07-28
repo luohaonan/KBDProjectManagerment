@@ -12,4 +12,6 @@ public interface InitiationApprovalRepository extends JpaRepository<InitiationAp
   Optional<InitiationApprovalEntity> findTopByProjectIdOrderByCreatedAtDesc(Long projectId);
 
   List<InitiationApprovalEntity> findBySubmitterUserIdOrderByCreatedAtDesc(Long submitterUserId);
+
+  void deleteByProjectId(Long projectId);
 }

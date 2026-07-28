@@ -3,16 +3,28 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Textarea } from './ui/textarea';
-import { FileUp, CheckCircle, AlertCircle, Save, Send, ThumbsUp, ThumbsDown, History, Loader2, FileText } from 'lucide-react';
+import { FileUp, CheckCircle, AlertCircle, Save, Send, ThumbsUp, ThumbsDown, History, Loader2, FileText, Download, Eye, Trash2 } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 
-interface DeliverableItem {
-  id: string;
-  name: string;
-  required: boolean;
-  uploaded: boolean;
-  file?: File;
+interface DeliverableSlot {
+  slotCode: string;
+  slotName: string;
+  isRequired: boolean;
+  description?: string;
+  allowedFileTypes?: string;
+  documents: DeliverableDocument[];
+}
+
+interface DeliverableDocument {
+  id: number;
+  fileName: string;
+  fileType?: string;
+  storagePath?: string;
+  uploader?: number;
+  uploadedAt?: string;
+  complianceStatus?: string;
+  isLocked?: boolean;
 }
 
 interface ReviewApprovalTask {
@@ -54,6 +66,36 @@ interface ReviewRecord {
   actionAt: string;
 }
 
+interface StepProgress {
+  stepCode: string;
+  stepName: string;
+  status: string;
+  completedAt: string | null;
+  tasks: TaskDetail[];
+}
+
+interface TaskDetail {
+  taskId: number;
+  approverUserId: number;
+  approverName: string;
+  approverRole: string;
+  deliverableSlotCode: string;
+  decision: string | null;
+  opinion: string | null;
+  decidedAt: string | null;
+  status: string;
+}
+
+interface ReviewProgressData {
+  projectId: number;
+  projectMilestoneId: number;
+  milestoneCode: string;
+  milestoneName: string;
+  currentStep: string;
+  status: string;
+  steps: StepProgress[];
+}
+
 interface MilestoneConsoleProps {
   currentStage: number;
   projectName: string;
@@ -63,63 +105,10 @@ interface MilestoneConsoleProps {
   reviewStatus?: string;
   /** 是否允许上传核心交付物（ROLE_DEPT_EXECUTOR 或 ADMIN 角色） */
   canUploadDeliverables?: boolean;
+  /** 部门执行人所属部门名称，用于动态提示 */
+  executorDeptName?: string;
   onReview?: () => void;
 }
-
-const getDeliverablesForStage = (stage: number): DeliverableItem[] => {
-  const stageDeliverablesMap: { [key: number]: DeliverableItem[] } = {
-    0: [
-      { id: '1', name: '立项报告', required: true, uploaded: false },
-      { id: '2', name: '靶点评估文档', required: true, uploaded: false },
-    ],
-    1: [
-      { id: '1', name: '先导化合物', required: true, uploaded: false },
-      { id: '2', name: '专利分析', required: true, uploaded: false },
-    ],
-    2: [
-      { id: '1', name: '优选化合物', required: true, uploaded: false },
-      { id: '2', name: '专利分析', required: true, uploaded: false },
-    ],
-    3: [
-      { id: '1', name: 'PCC 提名报告', required: true, uploaded: false },
-      { id: '2', name: '体内外药效数据', required: true, uploaded: false },
-      { id: '3', name: '初步ADME数据', required: true, uploaded: false },
-      { id: '4', name: '初步安全性评估', required: true, uploaded: false },
-      { id: '5', name: '专利策略文档', required: true, uploaded: false },
-    ],
-    4: [
-      { id: '1', name: 'GLP毒理报告', required: true, uploaded: false },
-      { id: '2', name: '药效总结报告', required: true, uploaded: false },
-      { id: '3', name: 'CMC初步总结报告', required: true, uploaded: false },
-      { id: '4', name: '专利FTO报告', required: true, uploaded: false },
-    ],
-    5: [
-      { id: '1', name: 'IND申报资料', required: true, uploaded: false },
-      { id: '2', name: '受理通知书', required: true, uploaded: false },
-      { id: '3', name: '临床试验批件', required: true, uploaded: false },
-    ],
-    6: [
-      { id: '1', name: '临床I期总结报告', required: true, uploaded: false },
-      { id: '2', name: '临床II期试验方案', required: true, uploaded: false },
-    ],
-    7: [
-      { id: '1', name: '临床II期总结报告', required: true, uploaded: false },
-      { id: '2', name: '临床III期试验方案', required: true, uploaded: false },
-      { id: '3', name: '注册策略确认文档', required: true, uploaded: false },
-    ],
-    8: [
-      { id: '1', name: '临床III期研究报告', required: true, uploaded: false },
-      { id: '2', name: '上市后承诺文档', required: true, uploaded: false },
-    ],
-    9: [
-      { id: '1', name: 'NDA申报资料', required: true, uploaded: false },
-      { id: '2', name: '受理通知书', required: true, uploaded: false },
-      { id: '3', name: '药品注册证书', required: true, uploaded: false },
-    ],
-  };
-
-  return stageDeliverablesMap[stage] || [];
-};
 
 const stageName = ['G0', 'G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8', 'G9'];
 const stageDescription = [
@@ -162,14 +151,17 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
   currentUserRoles = [],
   reviewStatus,
   canUploadDeliverables = false,
+  executorDeptName = '对应部门',
   onReview,
 }) => {
-  const [deliverables, setDeliverables] = useState<DeliverableItem[]>(
-    getDeliverablesForStage(currentStage)
-  );
+  const [deliverableSlots, setDeliverableSlots] = useState<DeliverableSlot[]>([]);
+  const [loadingDeliverables, setLoadingDeliverables] = useState(false);
+  const [uploadingSlot, setUploadingSlot] = useState<string | null>(null);
   const [reviews, setReviews] = useState<ReviewApproval[]>([]);
   const [records, setRecords] = useState<ReviewRecord[]>([]);
+  const [reviewProgress, setReviewProgress] = useState<ReviewProgressData | null>(null);
   const [loadingReviews, setLoadingReviews] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(false);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [submitComment, setSubmitComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -177,6 +169,26 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
   const [decisionLoading, setDecisionLoading] = useState<number | null>(null);
   const [decisionOpinion, setDecisionOpinion] = useState('');
   const isPm = currentUserRoles.includes('ROLE_PM');
+
+  const milestoneCode = stageName[currentStage];
+
+  // 加载交付物清单
+  const loadDeliverables = async () => {
+    if (!projectId) return;
+    setLoadingDeliverables(true);
+    try {
+      const res = await api.get(`/api/milestone-deliverables/project/${projectId}/milestone/${milestoneCode}`);
+      const result = res.data as { code: number; data: DeliverableSlot[]; message?: string };
+      if (result.code === 200 || result.code === 0) {
+        setDeliverableSlots(result.data || []);
+      }
+    } catch (error: any) {
+      console.error('加载交付物清单失败:', error);
+      toast.error('加载交付物清单失败');
+    } finally {
+      setLoadingDeliverables(false);
+    }
+  };
 
   // 加载评审数据
   const loadReviews = async () => {
@@ -212,26 +224,119 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (projectId) {
-      loadReviews();
-      loadRecords();
+  // 加载评审流程进度（未提交时也能显示流程节点配置）
+  const loadProgress = async () => {
+    if (!projectId) return;
+    setLoadingProgress(true);
+    try {
+      const res = await api.get(`/api/reviews/${projectId}/progress`);
+      const result = res.data as { code: number; data: ReviewProgressData; message?: string };
+      if (result.code === 200 || result.code === 0) {
+        setReviewProgress(result.data);
+      }
+    } catch (error: any) {
+      // progress API 可能因里程碑配置缺失而报错，不阻塞其他功能
+    } finally {
+      setLoadingProgress(false);
     }
-  }, [projectId]);
-
-  const handleFileUpload = (itemId: string, file: File) => {
-    setDeliverables(prev =>
-      prev.map(item =>
-        item.id === itemId
-          ? { ...item, uploaded: true, file }
-          : item
-      )
-    );
   };
 
-  const allRequiredUploaded = deliverables
-    .filter(d => d.required)
-    .every(d => d.uploaded);
+  useEffect(() => {
+    if (projectId) {
+      loadDeliverables();
+      loadReviews();
+      loadRecords();
+      loadProgress();
+    }
+  }, [projectId, milestoneCode]);
+
+  // 上传交付物
+  const handleUpload = async (slotCode: string, file: File) => {
+    if (!projectId) return;
+    setUploadingSlot(slotCode);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('projectId', String(projectId));
+      formData.append('milestoneCode', milestoneCode);
+      formData.append('slotCode', slotCode);
+
+      const res = await api.post('/api/milestone-deliverables/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const result = res.data as { code: number; data: DeliverableDocument; message?: string };
+      if (result.code === 200 || result.code === 0) {
+        toast.success('上传成功');
+        loadDeliverables();
+      } else {
+        toast.error(result.message || '上传失败');
+      }
+    } catch (error: any) {
+      toast.error('上传失败: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setUploadingSlot(null);
+    }
+  };
+
+  // 删除交付物
+  const handleDelete = async (docId: number) => {
+    if (!confirm('确定要删除该交付物吗？')) return;
+    try {
+      const res = await api.delete(`/api/milestone-deliverables/${docId}`);
+      const result = res.data as { code: number; message?: string };
+      if (result.code === 200 || result.code === 0) {
+        toast.success('删除成功');
+        loadDeliverables();
+      } else {
+        toast.error(result.message || '删除失败');
+      }
+    } catch (error: any) {
+      toast.error('删除失败: ' + (error.response?.data?.message || error.message));
+    }
+  };
+
+  // 预览交付物
+  const handlePreview = (docId: number) => {
+    api.get(`/api/documents/${docId}/preview`, {
+      params: { userId: currentUserId },
+      responseType: 'blob',
+    }).then(res => {
+      const rawContentType = res.headers['content-type'];
+      const contentType = typeof rawContentType === 'string'
+        ? rawContentType
+        : 'application/octet-stream';
+      const blob = new Blob([res.data], { type: contentType });
+      const previewUrl = window.URL.createObjectURL(blob);
+      window.open(previewUrl, '_blank', 'noopener,noreferrer');
+      setTimeout(() => window.URL.revokeObjectURL(previewUrl), 60_000);
+    }).catch(err => {
+      console.error('预览文件失败', err);
+      toast.error('预览文件失败');
+    });
+  };
+
+  // 下载交付物
+  const handleDownload = (docId: number, fileName: string) => {
+    const token = localStorage.getItem('token');
+    const url = `${api.defaults.baseURL}/api/milestone-deliverables/${docId}/download`;
+    // 使用 fetch 携带 token 下载
+    fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(res => res.blob())
+      .then(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      })
+      .catch(() => toast.error('下载失败'));
+  };
+
+  const allRequiredUploaded = deliverableSlots
+    .filter(s => s.isRequired)
+    .every(s => s.documents && s.documents.length > 0);
 
   // 保存草稿
   const handleSaveDraft = async () => {
@@ -306,7 +411,11 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
       });
       const result = res.data as { code: number; message?: string };
       if (result.code === 200 || result.code === 0) {
-        toast.success(decision === 'APPROVED' ? '已通过' : '已驳回');
+        toast.success(
+          decision === 'GO' ? '已通过' :
+          decision === 'CONDITIONAL_GO' ? '有条件通过' :
+          '已驳回'
+        );
         setDecisionOpinion('');
         loadReviews();
         loadRecords();
@@ -331,7 +440,13 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
     t => Number(t.approverUserId) === Number(currentUserId) && t.status === 'PENDING'
   );
 
-  const allowUpload = canUploadDeliverables;
+  // 当前用户是否已完成审批（有已完成的任务记录）
+  const myCompletedTask = activeReview?.tasks?.find(
+    t => Number(t.approverUserId) === Number(currentUserId) && t.status !== 'PENDING'
+  );
+
+  // 提交评审后或已通过时，执行人也不能再上传
+  const allowUpload = canUploadDeliverables && !isUnderReview && !isApproved;
 
   return (
     <div className="space-y-6">
@@ -341,7 +456,7 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-slate-100">
-                {projectName} - {stageName[currentStage]}
+                {projectName} - {milestoneCode}
               </CardTitle>
               <p className="text-sm text-slate-400 mt-2">
                 {stageDescription[currentStage]}
@@ -354,7 +469,7 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
                 </Badge>
               )}
               <Badge className="bg-blue-600 text-white px-3 py-1">
-                {stageName[currentStage]}
+                {milestoneCode}
               </Badge>
             </div>
           </div>
@@ -365,84 +480,147 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
       <Card className="bg-slate-800 border-slate-600">
         <CardHeader>
           <CardTitle className="text-slate-100">核心交付物清单</CardTitle>
-          {!canUploadDeliverables && (
-            <p className="text-sm text-slate-400 mt-1">
-              仅「新药资讯部」的 efficiency_user 账号可上传交付物
-            </p>
-          )}
+          {canUploadDeliverables && !isUnderReview && !isApproved && (
+             <p className="text-sm text-slate-400 mt-1">
+               请上传所有必填交付物后提交评审
+             </p>
+           )}
+           {canUploadDeliverables && isUnderReview && (
+             <p className="text-sm text-blue-400 mt-1">
+               评审已提交，等待审批中，暂不可修改交付物
+             </p>
+           )}
+           {canUploadDeliverables && isApproved && (
+             <p className="text-sm text-green-400 mt-1">
+               评审已通过，交付物已锁定
+             </p>
+           )}
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {deliverables.map(item => (
-              <div
-                key={item.id}
-                className="flex items-center justify-between p-4 bg-slate-700 rounded border border-slate-600"
-              >
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-100 font-medium">
-                      {item.name}
-                    </span>
-                    {item.required && (
-                      <span className="text-red-500 text-sm">必填</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  {item.uploaded ? (
-                    <div className="flex items-center gap-2 text-green-400">
-                      <CheckCircle className="w-5 h-5" />
-                      <span className="text-sm">{item.file?.name}</span>
+          {loadingDeliverables ? (
+            <div className="flex items-center gap-2 text-slate-400 text-sm py-4">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              加载中...
+            </div>
+          ) : deliverableSlots.length === 0 ? (
+            <p className="text-slate-400 text-sm py-4">
+              暂无交付物定义
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {deliverableSlots.map(slot => {
+                const hasDoc = slot.documents && slot.documents.length > 0;
+                const doc = hasDoc ? slot.documents[0] : null;
+                const isUploading = uploadingSlot === slot.slotCode;
+                return (
+                  <div
+                    key={slot.slotCode}
+                    className="flex items-center justify-between p-4 bg-slate-700 rounded border border-slate-600"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-100 font-medium">
+                          {slot.slotName}
+                        </span>
+                        {slot.isRequired && (
+                          <span className="text-red-500 text-sm">必填</span>
+                        )}
+                      </div>
+                      {slot.description && (
+                        <p className="text-sm text-slate-400 mt-1">{slot.description}</p>
+                      )}
                     </div>
-                  ) : allowUpload ? (
-                    <label className="flex items-center gap-2 px-3 py-2 bg-slate-600 rounded cursor-pointer hover:bg-slate-500 transition">
-                      <FileUp className="w-4 h-4 text-slate-300" />
-                      <span className="text-sm text-slate-300">上传</span>
-                      <input
-                        type="file"
-                        hidden
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            handleFileUpload(item.id, file);
-                          }
-                        }}
-                        accept=".pdf,.doc,.docx"
-                      />
-                    </label>
-                  ) : (
-                    <span className="text-sm text-slate-500">不可上传</span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
 
-          {/* 上传状态摘要 */}
-          <div className="mt-6 p-4 bg-slate-700 rounded flex items-start gap-3">
-            {allRequiredUploaded ? (
-              <>
-                <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-green-400 font-semibold">所有必填文件已上传</p>
-                  <p className="text-slate-300 text-sm">
-                    现在可以提交评审申请
-                  </p>
-                </div>
-              </>
-            ) : (
-              <>
-                <AlertCircle className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-yellow-500 font-semibold">还有必填文件未上传</p>
-                  <p className="text-slate-300 text-sm">
-                    请完成所有必填项才能提交评审
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
+                    <div className="flex items-center gap-3">
+                      {hasDoc && doc ? (
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2 text-green-400">
+                            <CheckCircle className="w-4 h-4" />
+                            <span className="text-sm">{doc.fileName}</span>
+                          </div>
+                          <button
+                            className="p-1.5 rounded hover:bg-slate-600 transition text-slate-300 hover:text-white"
+                            title="预览"
+                            onClick={() => handlePreview(doc.id)}
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            className="p-1.5 rounded hover:bg-slate-600 transition text-slate-300 hover:text-white"
+                            title="下载"
+                            onClick={() => handleDownload(doc.id, doc.fileName)}
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                          {allowUpload && !doc.isLocked && (
+                            <button
+                              className="p-1.5 rounded hover:bg-red-900/50 transition text-slate-300 hover:text-red-400"
+                              title="删除"
+                              onClick={() => handleDelete(doc.id)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      ) : allowUpload ? (
+                        <label className={`flex items-center gap-2 px-3 py-2 bg-slate-600 rounded cursor-pointer hover:bg-slate-500 transition ${isUploading ? 'opacity-50 cursor-wait' : ''}`}>
+                          {isUploading ? (
+                            <Loader2 className="w-4 h-4 text-slate-300 animate-spin" />
+                          ) : (
+                            <FileUp className="w-4 h-4 text-slate-300" />
+                          )}
+                          <span className="text-sm text-slate-300">
+                            {isUploading ? '上传中...' : '上传'}
+                          </span>
+                          <input
+                            type="file"
+                            hidden
+                            disabled={isUploading}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                handleUpload(slot.slotCode, file);
+                              }
+                            }}
+                            accept={slot.allowedFileTypes || '.pdf,.doc,.docx'}
+                          />
+                        </label>
+                      ) : (
+                        <span className="text-sm text-slate-500">未上传</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 上传状态摘要 - 仅在可编辑状态下显示 */}
+          {allowUpload && deliverableSlots.length > 0 && (
+            <div className="mt-6 p-4 bg-slate-700 rounded flex items-start gap-3">
+              {allRequiredUploaded ? (
+                <>
+                  <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-green-400 font-semibold">所有必填文件已上传</p>
+                    <p className="text-slate-300 text-sm">
+                      现在可以提交评审申请
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="w-5 h-5 text-yellow-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-yellow-500 font-semibold">还有必填文件未上传</p>
+                    <p className="text-slate-300 text-sm">
+                      请完成所有必填项才能提交评审
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -452,19 +630,45 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
           <CardTitle className="text-slate-100">评审操作</CardTitle>
         </CardHeader>
         <CardContent>
-          {/* 评审备注 */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-slate-300 mb-2">
-              评审备注
-            </label>
-            <Textarea
-              value={submitComment}
-              onChange={(e) => setSubmitComment(e.target.value)}
-              placeholder="请输入评审备注说明..."
-              className="bg-slate-700 border-slate-600 text-slate-100 min-h-[80px]"
-              disabled={isUnderReview || isApproved}
-            />
-          </div>
+          {/* 评审备注 - 仅部门执行人在未提交状态下显示可编辑输入框 */}
+           {canUploadDeliverables && !isUnderReview && !isApproved && (
+             <div className="mb-4">
+               <label className="block text-sm font-medium text-slate-300 mb-2">
+                 评审备注
+               </label>
+               <Textarea
+                 value={submitComment}
+                 onChange={(e) => setSubmitComment(e.target.value)}
+                 placeholder="请输入评审备注说明..."
+                 className="bg-slate-700 border-slate-600 text-slate-100 min-h-[80px]"
+               />
+             </div>
+           )}
+           {/* 评审状态提示 */}
+           {isUnderReview && myPendingTask && (
+             <div className="mb-4 p-3 bg-yellow-900/30 border border-yellow-700 rounded flex items-center gap-2">
+               <AlertCircle className="w-5 h-5 text-yellow-400" />
+               <span className="text-yellow-300">待您审批，请在下方填写评审意见并作出决策</span>
+             </div>
+           )}
+           {isUnderReview && !myPendingTask && myCompletedTask && (
+             <div className="mb-4 p-3 bg-blue-900/30 border border-blue-700 rounded flex items-center gap-2">
+               <CheckCircle className="w-5 h-5 text-blue-400" />
+               <span className="text-blue-300">您已完成审批，等待后续评审</span>
+             </div>
+           )}
+           {isUnderReview && !myPendingTask && !myCompletedTask && (
+             <div className="mb-4 p-3 bg-blue-900/30 border border-blue-700 rounded flex items-center gap-2">
+               <AlertCircle className="w-5 h-5 text-blue-400" />
+               <span className="text-blue-300">评审已提交，等待审批</span>
+             </div>
+           )}
+           {isApproved && (
+             <div className="mb-4 p-3 bg-green-900/30 border border-green-700 rounded flex items-center gap-2">
+               <CheckCircle className="w-5 h-5 text-green-400" />
+               <span className="text-green-300">评审已通过</span>
+             </div>
+           )}
 
           {/* 操作按钮 - 部门执行人 */}
           <div className="flex gap-4">
@@ -496,19 +700,7 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
               </>
             )}
 
-            {/* 评审状态提示 */}
-            {isUnderReview && (
-              <div className="flex-1 p-3 bg-blue-900/30 border border-blue-700 rounded flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 text-blue-400" />
-                <span className="text-blue-300">评审已提交，等待审批</span>
-              </div>
-            )}
-            {isApproved && (
-              <div className="flex-1 p-3 bg-green-900/30 border border-green-700 rounded flex items-center gap-2">
-                <CheckCircle className="w-5 h-5 text-green-400" />
-                <span className="text-green-300">评审已通过</span>
-              </div>
-            )}
+            {/* 评审未通过状态提示 */}
             {isRejected && (
               <div className="flex-1 p-3 bg-red-900/30 border border-red-700 rounded flex items-center gap-2">
                 <AlertCircle className="w-5 h-5 text-red-400" />
@@ -570,23 +762,58 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
             </div>
           )}
 
-          {/* 评审历史 */}
-          <div className="mt-6 pt-6 border-t border-slate-600">
-            <h3 className="text-slate-100 font-semibold mb-3 flex items-center gap-2">
-              <History className="w-4 h-4" />
-              评审历史
-            </h3>
+          {/* 评审流程 */}
+           <div className="mt-6 pt-6 border-t border-slate-600">
+             <h3 className="text-slate-100 font-semibold mb-3 flex items-center gap-2">
+               <History className="w-4 h-4" />
+               评审流程
+             </h3>
 
-            {/* 评审列表 */}
-            {loadingReviews ? (
+            {/* 评审流程进度 - 优先展示从 progress API 获取的流程节点配置 */}
+            {loadingProgress ? (
               <div className="flex items-center gap-2 text-slate-400 text-sm py-4">
                 <Loader2 className="w-4 h-4 animate-spin" />
                 加载中...
               </div>
+            ) : reviewProgress && reviewProgress.steps && reviewProgress.steps.length > 0 ? (
+              <div className="space-y-3">
+                {reviewProgress.steps.map((step) => (
+                  <div key={step.stepCode} className="p-4 bg-slate-700 rounded border border-slate-600">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-100 font-medium">{step.stepName}</span>
+                        <span className="text-slate-500 text-xs">({step.stepCode})</span>
+                      </div>
+                      <Badge className={
+                        step.status === 'APPROVED' ? 'bg-green-600 text-white text-xs' :
+                        step.status === 'IN_PROGRESS' ? 'bg-blue-600 text-white text-xs' :
+                        'bg-slate-500 text-white text-xs'
+                      }>
+                        {step.status === 'APPROVED' ? '已通过' :
+                         step.status === 'IN_PROGRESS' ? '进行中' : '待处理'}
+                      </Badge>
+                    </div>
+                    {step.tasks && step.tasks.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {step.tasks.map((task) => (
+                          <div key={task.taskId} className="text-sm text-slate-300 flex items-center gap-2">
+                            <span>{task.approverName}</span>
+                            {task.status === 'PENDING' && <Badge className="bg-yellow-600 text-white text-xs">待审批</Badge>}
+                            {(task.status === 'APPROVED' || task.decision === 'GO') && <Badge className="bg-green-600 text-white text-xs">已通过</Badge>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {(!step.tasks || step.tasks.length === 0) && (
+                      <p className="text-sm text-slate-400 mt-1">审批流程已按流程管理预配置，提交后将直接进入对应审批节点</p>
+                    )}
+                  </div>
+                ))}
+              </div>
             ) : reviews.length === 0 ? (
-              <p className="text-slate-400 text-sm">
-                暂无评审记录。提交评审后，评审历史将显示在此。
-              </p>
+               <p className="text-slate-400 text-sm">
+                 暂无评审流程。提交评审后，评审流程将显示在此。
+               </p>
             ) : (
               <div className="space-y-4">
                 {reviews.map((review) => (
@@ -647,13 +874,13 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
         </CardContent>
       </Card>
 
-      {/* 评审记录 */}
-      <Card className="bg-slate-800 border-slate-600">
-        <CardHeader>
-          <CardTitle className="text-slate-100 flex items-center gap-2">
-            <FileText className="w-4 h-4" />
-            评审记录
-          </CardTitle>
+       {/* 评审历史 */}
+       <Card className="bg-slate-800 border-slate-600">
+         <CardHeader>
+           <CardTitle className="text-slate-100 flex items-center gap-2">
+             <FileText className="w-4 h-4" />
+             评审历史
+           </CardTitle>
         </CardHeader>
         <CardContent>
           {loadingRecords ? (
@@ -662,9 +889,9 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
               加载中...
             </div>
           ) : records.length === 0 ? (
-            <p className="text-slate-400 text-sm">
-              暂无评审记录。
-            </p>
+             <p className="text-slate-400 text-sm">
+               暂无评审历史。
+             </p>
           ) : (
             <div className="space-y-3">
               {records.map((record) => (

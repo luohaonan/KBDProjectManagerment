@@ -63,7 +63,12 @@ public record ProjectDetailResponse(
 
   public record ProcessOversightDeptDto(long deptId, String deptCode, String deptName) {}
 
-  public record CurrentMilestoneDto(String code, String name, String phaseLabel) {}
+  public record CurrentMilestoneDto(
+      String milestoneCode,
+      String milestoneName,
+      String phaseLabel,
+      /** 当前里程碑阶段 DEPT_EXECUTOR 角色对应的部门名称列表 */
+      java.util.List<String> executorDeptNames) {}
 
   public record BudgetExecutionSummaryDto(
       BigDecimal plannedTotalAmount,

@@ -81,4 +81,34 @@ public class DocumentController {
         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + doc.getFileName() + "\"")
         .body(resource);
   }
+
+  @GetMapping("/{id}/preview")
+  public ResponseEntity<Resource> previewDocument(@PathVariable Long id, @RequestParam Long userId) throws IOException {
+    DocumentEntity doc = documentService.getDocumentById(id);
+
+    if (!fileStorageService.hasPermission(userId, doc)) {
+      return ResponseEntity.status(403).build();
+    }
+
+    Resource resource = fileStorageService.loadFileAsResource(doc.getStoragePath());
+    String fileName = doc.getFileName().toLowerCase();
+    MediaType mediaType;
+    if (fileName.endsWith(".pdf")) {
+      mediaType = MediaType.APPLICATION_PDF;
+    } else if (fileName.endsWith(".png")) {
+      mediaType = MediaType.IMAGE_PNG;
+    } else if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) {
+      mediaType = MediaType.IMAGE_JPEG;
+    } else if (fileName.endsWith(".gif")) {
+      mediaType = MediaType.IMAGE_GIF;
+    } else if (fileName.endsWith(".txt") || fileName.endsWith(".csv") || fileName.endsWith(".log")) {
+      mediaType = MediaType.TEXT_PLAIN;
+    } else {
+      mediaType = MediaType.APPLICATION_OCTET_STREAM;
+    }
+    return ResponseEntity.ok()
+        .contentType(mediaType)
+        .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + doc.getFileName() + "\"")
+        .body(resource);
+  }
 }

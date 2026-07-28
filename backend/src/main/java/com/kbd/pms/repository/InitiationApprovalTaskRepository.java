@@ -9,4 +9,6 @@ public interface InitiationApprovalTaskRepository extends JpaRepository<Initiati
   List<InitiationApprovalTaskEntity> findByInitiationApprovalIdOrderBySortOrderAsc(Long initiationApprovalId);
 
   List<InitiationApprovalTaskEntity> findByApproverUserIdOrderByCreatedAtDesc(Long approverUserId);
+
+  void deleteByInitiationApprovalId(Long initiationApprovalId);
 }

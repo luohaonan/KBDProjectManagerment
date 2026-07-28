@@ -82,6 +82,53 @@ public class DepartmentService {
     }
 
     /**
+     * 更新部门信息（主要是修改名称）
+     */
+    @Transactional
+    public DepartmentDto updateDepartment(Long deptId, String deptName) {
+        OrgDepartmentEntity dept = deptRepository.findById(deptId)
+                .orElseThrow(() -> new ApiException(404, "部门不存在"));
+
+        if (deptName != null && !deptName.trim().isEmpty()) {
+            dept.setDeptName(deptName.trim());
+        }
+        dept.setUpdatedAt(Instant.now());
+        dept = deptRepository.save(dept);
+
+        DepartmentDto dto = DepartmentDto.fromEntity(dept);
+        List<User> members = userRepository.findByDepartmentId(dept.getId());
+        dto.setMemberCount(members.size());
+        if (dept.getHeadUserId() != null) {
+            dto.setHeadUserId(dept.getHeadUserId());
+            userRepository.findById(dept.getHeadUserId()).ifPresent(headUser -> {
+                dto.setHeadUserName(headUser.getUsername());
+            });
+        }
+        return dto;
+    }
+
+    /**
+     * 删除部门
+     */
+    @Transactional
+    public void deleteDepartment(Long deptId) {
+        OrgDepartmentEntity dept = deptRepository.findById(deptId)
+                .orElseThrow(() -> new ApiException(404, "部门不存在"));
+
+        // 将该部门从所有用户的部门关联中移除
+        List<User> usersInDept = userRepository.findByDepartmentId(deptId);
+        for (User user : usersInDept) {
+            if (user.getDepartments() != null) {
+                user.getDepartments().removeIf(d -> d.getId().equals(deptId));
+            }
+            user.setUpdatedAt(Instant.now());
+            userRepository.save(user);
+        }
+
+        deptRepository.delete(dept);
+    }
+
+    /**
      * 指派部门负责人
      */
     @Transactional

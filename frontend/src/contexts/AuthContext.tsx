@@ -32,7 +32,11 @@ export const useAuth = () => {
 const parseJwt = (token: string) => {
   try {
     const payload = token.split('.')[1];
-    return JSON.parse(atob(payload));
+    // JWT 使用 base64url 编码，需要转换为标准 base64 才能用 atob 解码
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    // 添加缺失的 padding
+    const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+    return JSON.parse(atob(base64 + padding));
   } catch {
     return null;
   }
@@ -108,9 +112,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const parsedUser = buildUserFromToken(token);
     if (parsedUser) {
       setUser(parsedUser);
+      // 异步获取完整信息
+      fetchUserInfo();
+    } else {
+      // token 解析失败，清除并登出
+      localStorage.removeItem('token');
+      setUser(null);
     }
-    // 异步获取完整信息
-    fetchUserInfo();
   };
 
   const logout = () => {

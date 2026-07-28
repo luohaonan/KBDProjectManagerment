@@ -78,6 +78,32 @@ public class DepartmentController {
     }
 
     /**
+     * 更新部门信息（修改部门名称）
+     * 请求体: { "deptName": "新名称" }
+     */
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Result<DepartmentDto>> updateDepartment(@PathVariable Long id,
+                                                                    @RequestBody Map<String, String> body) {
+        String deptName = body.get("deptName");
+        if (deptName == null || deptName.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(Result.fail(400, "部门名称不能为空"));
+        }
+        DepartmentDto dto = departmentService.updateDepartment(id, deptName);
+        return ResponseEntity.ok(Result.ok(dto));
+    }
+
+    /**
+     * 删除部门
+     */
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Result<Void>> deleteDepartment(@PathVariable Long id) {
+        departmentService.deleteDepartment(id);
+        return ResponseEntity.ok(Result.ok(null));
+    }
+
+    /**
      * 移除部门成员
      */
     @DeleteMapping("/{id}/members/{userId}")

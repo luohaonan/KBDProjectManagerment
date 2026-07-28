@@ -91,6 +91,7 @@ public class ReviewService {
   private final InitiationApprovalTaskRepository initiationApprovalTaskRepository;
   private final SecurityHelper securityHelper;
   private final WfProcessService wfProcessService;
+  private final NotificationService notificationService;
 
   public ReviewService(
       ProjectRepository projectRepository,
@@ -108,7 +109,8 @@ public class ReviewService {
       InitiationApprovalRepository initiationApprovalRepository,
       InitiationApprovalTaskRepository initiationApprovalTaskRepository,
       SecurityHelper securityHelper,
-      WfProcessService wfProcessService) {
+      WfProcessService wfProcessService,
+      NotificationService notificationService) {
     this.projectRepository = projectRepository;
     this.projectMilestoneRepository = projectMilestoneRepository;
     this.milestoneDefRepository = milestoneDefRepository;
@@ -125,6 +127,7 @@ public class ReviewService {
     this.initiationApprovalTaskRepository = initiationApprovalTaskRepository;
     this.securityHelper = securityHelper;
     this.wfProcessService = wfProcessService;
+    this.notificationService = notificationService;
   }
 
   // ==================== 交付物上传 ====================
@@ -145,12 +148,31 @@ public class ReviewService {
     IamUserEntity actor = iamUserRepository.findById(request.actorUserId())
         .orElseThrow(() -> new ApiException(404, "用户不存在"));
 
-    // 验证该用户是否为对应部门的执行人
-    List<MilestoneDeptRoleEntity> roles = milestoneDeptRoleRepository
-        .findByMilestoneDefIdAndRoleTypeAndIsActiveTrue(def.getId(), "DEPT_EXECUTOR");
-    boolean authorized = roles.stream().anyMatch(r ->
-        r.getDeptId() != null && r.getDeptId().equals(actor.getDeptId()));
+    // 验证该用户是否为对应部门的执行人（从流程引擎上传节点配置中获取部门）
+    WfProcessDefinition processDef = wfProcessService.getActiveMilestoneProcess(def.getMilestoneCode());
+    List<Long> uploaderDeptIds = new ArrayList<>();
+    for (WfProcessNode node : processDef.getNodes()) {
+      if (Boolean.TRUE.equals(node.getIsUploader()) && node.getApproverValue() != null) {
+        for (String deptIdStr : node.getApproverValue().split(",")) {
+          try {
+            uploaderDeptIds.add(Long.parseLong(deptIdStr.trim()));
+          } catch (NumberFormatException e) {
+            // 忽略无效的部门ID
+          }
+        }
+      }
+    }
+    boolean authorized = uploaderDeptIds.contains(actor.getDeptId());
     if (!authorized) {
+      String deptNames = uploaderDeptIds.stream()
+          .map(deptId -> orgDepartmentRepository.findById(deptId)
+              .map(OrgDepartmentEntity::getDeptName)
+              .orElse(null))
+          .filter(name -> name != null)
+          .collect(Collectors.joining("、"));
+      if (!deptNames.isEmpty()) {
+        throw new ApiException(403, "仅「" + deptNames + "」的部门执行人可上传交付物");
+      }
       throw new ApiException(403, "您不是当前里程碑阶段的部门执行人，无法上传交付物");
     }
 
@@ -182,6 +204,13 @@ public class ReviewService {
 
     writeRecord(projectId, pm.getId(), null, "UPLOAD", request.actorUserId(),
         "DOCUMENT_UPLOADED", "上传交付物: " + request.deliverableSlotCode());
+
+    // 触发器：通知同部门其他执行人
+    try {
+      notifyDeptExecutorsForUpload(project, def, actor);
+    } catch (Exception e) {
+      // 通知发送失败不应影响主业务流程
+    }
 
     return doc;
   }
@@ -1074,5 +1103,25 @@ public class ReviewService {
         entity.getAction(), entity.getActorUserId(), actorName,
         entity.getActorRole(), entity.getResult(), entity.getOpinion(),
         entity.getActionAt());
+  }
+
+  // ==================== 通知辅助方法 ====================
+
+  /**
+   * 触发器：上传交付物 → 通知同部门其他执行人
+   */
+  private void notifyDeptExecutorsForUpload(ProjectEntity project, MilestoneDefEntity def,
+                                            IamUserEntity actor) {
+    if (actor.getDeptId() == null) return;
+
+    String milestoneCode = def.getMilestoneCode();
+    String milestoneName = def.getMilestoneName();
+    String title = "交付物已上传";
+    String content = "[" + project.getProjectName() + "][" + milestoneName + "] 的交付物已由 "
+        + actor.getDisplayName() + " 上传";
+
+    notificationService.sendNotificationToDeptExecutors(
+        actor.getDeptId(), "DELIVERABLE_UPLOADED", title, content,
+        project.getId(), milestoneCode, actor.getId());
   }
 }

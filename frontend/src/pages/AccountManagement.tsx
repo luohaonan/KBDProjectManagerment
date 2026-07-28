@@ -7,7 +7,14 @@ import { Badge } from '../components/ui/badge';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 import { toast } from 'sonner';
-import { UserPlus, Key, Shield, ShieldCheck, ArrowLeft, Save, X, Building2, UserCog } from 'lucide-react';
+import { UserPlus, Key, Shield, ShieldCheck, ArrowLeft, Save, X, Building2, UserCog, Trash2, Edit3 } from 'lucide-react';
+
+const lightTagClass = 'bg-slate-100 text-slate-700 border-slate-300';
+const lightTagClassXs = 'bg-slate-100 text-slate-700 border-slate-300 text-xs';
+const selectableTagClass = 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100';
+const selectableTagActiveClass = 'bg-blue-100 border-blue-300 text-slate-900';
+const managementTabClass = 'rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none hover:bg-slate-100';
+const managementTabActiveClass = 'bg-blue-100 border-blue-300 text-slate-900';
 
 interface UserInfo {
   id: number;
@@ -65,6 +72,8 @@ const AccountManagement: React.FC = () => {
   const [showAddMember, setShowAddMember] = useState(false);
   const [availableUsers, setAvailableUsers] = useState<UserInfo[]>([]);
   const [selectedAddUserId, setSelectedAddUserId] = useState<number | undefined>(undefined);
+  const [showEditDept, setShowEditDept] = useState<DepartmentInfo | null>(null);
+  const [editDeptName, setEditDeptName] = useState('');
 
   // 表单状态
   const [newUser, setNewUser] = useState({ username: '', password: '', email: '', roles: [] as string[], departmentIds: [] as number[] });
@@ -76,21 +85,27 @@ const AccountManagement: React.FC = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [isAdmin]);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [usersRes, rolesRes, permsRes, deptRes] = await Promise.all([
-        api.get('/api/users'),
-        api.get('/api/users/roles'),
-        api.get('/api/users/permissions'),
-        api.get('/api/departments'),
-      ]);
-      setUsers(usersRes.data.data || []);
-      setRoles(rolesRes.data.data || []);
-      setPermissions(permsRes.data.data || []);
-      setDepartments(deptRes.data.data || []);
+      if (isAdmin) {
+        const [usersRes, rolesRes, permsRes, deptRes] = await Promise.all([
+          api.get('/api/users'),
+          api.get('/api/users/roles'),
+          api.get('/api/users/permissions'),
+          api.get('/api/departments'),
+        ]);
+        setUsers(usersRes.data.data || []);
+        setRoles(rolesRes.data.data || []);
+        setPermissions(permsRes.data.data || []);
+        setDepartments(deptRes.data.data || []);
+      } else {
+        // 非管理员只加载权限列表（用于展示）
+        const permsRes = await api.get('/api/users/permissions');
+        setPermissions(permsRes.data.data || []);
+      }
     } catch (error) {
       toast.error('加载数据失败');
       console.error('Load data error:', error);
@@ -233,6 +248,55 @@ const AccountManagement: React.FC = () => {
     }
   };
 
+  const handleDeleteUser = async (targetUser: UserInfo) => {
+    if (!window.confirm(`确定要删除用户"${targetUser.username}"吗？此操作不可撤销。`)) return;
+    try {
+      await api.delete(`/api/users/${targetUser.id}`);
+      toast.success('用户已删除');
+      loadData();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || '删除用户失败');
+    }
+  };
+
+  const handleUpdateDepartment = async () => {
+    if (!showEditDept || !editDeptName.trim()) {
+      toast.error('部门名称不能为空');
+      return;
+    }
+    try {
+      await api.put(`/api/departments/${showEditDept.id}`, { deptName: editDeptName.trim() });
+      toast.success('部门名称已更新');
+      setShowEditDept(null);
+      setEditDeptName('');
+      loadData();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || '更新部门失败');
+    }
+  };
+
+  const handleDeleteDepartment = async (dept: DepartmentInfo) => {
+    if (!window.confirm(`确定要删除部门"${dept.deptName}"吗？此操作不可撤销。`)) return;
+    try {
+      await api.delete(`/api/departments/${dept.id}`);
+      toast.success('部门已删除');
+      loadData();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || '删除部门失败');
+    }
+  };
+
+  const handleDeleteRole = async (role: RoleInfo) => {
+    if (!window.confirm(`确定要删除权限组"${role.name.replace('ROLE_', '')}"吗？此操作不可撤销。`)) return;
+    try {
+      await api.delete(`/api/users/roles/${role.id}`);
+      toast.success('权限组已删除');
+      loadData();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || '删除权限组失败');
+    }
+  };
+
   const openAddMember = () => {
     if (!showDeptDetail) return;
     // 过滤出不在当前部门的用户
@@ -272,47 +336,49 @@ const AccountManagement: React.FC = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-6">
-        {/* 当前用户信息 */}
-        <Card className="bg-slate-800 border-slate-600 mb-6">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-400">当前用户</p>
-                <p className="text-lg font-semibold">{user?.username}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm text-slate-400">角色</p>
-                <div className="flex gap-1 mt-1">
-                  {user?.roles.map(role => (
-                    <Badge key={role} variant="outline" className="bg-blue-900/50 text-blue-300 border-blue-700">
-                      {role.replace('ROLE_', '')}
-                    </Badge>
-                  ))}
+        {/* 当前用户信息 - 仅管理员可见（非管理员用下方"我的权限"卡片替代） */}
+        {isAdmin && (
+          <Card className="bg-slate-800 border-slate-600 mb-6">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-400">当前用户</p>
+                  <p className="text-lg font-semibold">{user?.username}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-slate-400">角色</p>
+                  <div className="flex gap-1 mt-1">
+                    {user?.roles.map(role => (
+                      <Badge key={role} variant="outline" className={lightTagClass}>
+                        {role.replace('ROLE_', '')}
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-            {user?.permissions && user.permissions.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-slate-700">
-                <p className="text-sm text-slate-400 mb-2">拥有的权限</p>
-                <div className="flex flex-wrap gap-1">
-                  {user.permissions.map(perm => (
-                    <Badge key={perm} variant="outline" className="bg-green-900/30 text-green-300 border-green-700 text-xs">
-                      {perm}
-                    </Badge>
-                  ))}
+              {user?.permissions && user.permissions.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-slate-700">
+                  <p className="text-sm text-slate-400 mb-2">拥有的权限</p>
+                  <div className="flex flex-wrap gap-1">
+                    {user.permissions.map(perm => (
+                      <Badge key={perm} variant="outline" className={lightTagClassXs}>
+                        {perm}
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* 标签切换 */}
         {isAdmin && (
-          <div className="flex gap-2 mb-6">
+          <div className="mb-6 flex flex-wrap gap-2 rounded-lg bg-white p-2 shadow-sm">
             <Button
               variant={activeTab === 'users' ? 'default' : 'outline'}
               onClick={() => setActiveTab('users')}
-              className={activeTab === 'users' ? 'bg-blue-600' : 'border-slate-600 text-slate-300'}
+              className={`${managementTabClass} ${activeTab === 'users' ? managementTabActiveClass : ''}`}
             >
               <Shield className="w-4 h-4 mr-2" />
               用户管理
@@ -320,7 +386,7 @@ const AccountManagement: React.FC = () => {
             <Button
               variant={activeTab === 'departments' ? 'default' : 'outline'}
               onClick={() => setActiveTab('departments')}
-              className={activeTab === 'departments' ? 'bg-blue-600' : 'border-slate-600 text-slate-300'}
+              className={`${managementTabClass} ${activeTab === 'departments' ? managementTabActiveClass : ''}`}
             >
               <Building2 className="w-4 h-4 mr-2" />
               部门管理
@@ -328,7 +394,7 @@ const AccountManagement: React.FC = () => {
             <Button
               variant={activeTab === 'roles' ? 'default' : 'outline'}
               onClick={() => setActiveTab('roles')}
-              className={activeTab === 'roles' ? 'bg-blue-600' : 'border-slate-600 text-slate-300'}
+              className={`${managementTabClass} ${activeTab === 'roles' ? managementTabActiveClass : ''}`}
             >
               <ShieldCheck className="w-4 h-4 mr-2" />
               权限组设置
@@ -370,7 +436,7 @@ const AccountManagement: React.FC = () => {
                         <td className="p-4">
                           <div className="flex flex-wrap gap-1">
                             {u.roles.map(role => (
-                              <Badge key={role} variant="outline" className="bg-purple-900/30 text-purple-300 border-purple-700 text-xs">
+                              <Badge key={role} variant="outline" className={lightTagClassXs}>
                                 {role.replace('ROLE_', '')}
                               </Badge>
                             ))}
@@ -382,7 +448,7 @@ const AccountManagement: React.FC = () => {
                             : '-'}
                         </td>
                         <td className="p-4">
-                          <Badge variant="outline" className={u.isActive ? 'bg-green-900/30 text-green-300 border-green-700' : 'bg-red-900/30 text-red-300 border-red-700'}>
+                          <Badge variant="outline" className={u.isActive ? lightTagClass : lightTagClass}>
                             {u.isActive ? '激活' : '禁用'}
                           </Badge>
                         </td>
@@ -405,6 +471,15 @@ const AccountManagement: React.FC = () => {
                               title="修改角色"
                             >
                               <Shield className="w-3 h-3" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleDeleteUser(u)}
+                              className="border-red-800 text-red-400 hover:bg-red-900/20"
+                              title="删除用户"
+                            >
+                              <Trash2 className="w-3 h-3" />
                             </Button>
                           </div>
                         </td>
@@ -435,15 +510,38 @@ const AccountManagement: React.FC = () => {
                           编码: {dept.deptCode} | 类型: {dept.deptType}
                         </p>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openDeptDetail(dept)}
-                        className="border-slate-600 text-slate-300 hover:bg-slate-700"
-                      >
-                        <UserCog className="w-4 h-4 mr-1" />
-                        查看成员
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setEditDeptName(dept.deptName);
+                            setShowEditDept(dept);
+                          }}
+                          className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                          title="修改名称"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteDepartment(dept)}
+                          className="border-red-800 text-red-400 hover:bg-red-900/20"
+                          title="删除部门"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openDeptDetail(dept)}
+                          className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                        >
+                          <UserCog className="w-4 h-4 mr-1" />
+                          查看成员
+                        </Button>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent>
@@ -481,21 +579,33 @@ const AccountManagement: React.FC = () => {
                         </CardTitle>
                         <p className="text-sm text-slate-400 mt-1">{role.description}</p>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openPermissionModal(role)}
-                        className="border-slate-600 text-slate-300 hover:bg-slate-700"
-                      >
-                        <ShieldCheck className="w-4 h-4 mr-1" />
-                        编辑权限
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openPermissionModal(role)}
+                          className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                        >
+                          <ShieldCheck className="w-4 h-4 mr-1" />
+                          编辑权限
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteRole(role)}
+                          className="border-red-800 text-red-400 hover:bg-red-900/20"
+                          title="删除权限组"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          删除
+                        </Button>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent>
                     <div className="flex flex-wrap gap-1">
                       {role.permissions.map(p => (
-                        <Badge key={p.name} variant="outline" className="bg-green-900/30 text-green-300 border-green-700 text-xs">
+                        <Badge key={p.name} variant="outline" className={lightTagClassXs}>
                           {p.name}
                         </Badge>
                       ))}
@@ -509,39 +619,51 @@ const AccountManagement: React.FC = () => {
 
         {/* 非管理员查看自己的权限 */}
         {!isAdmin && (
-          <Card className="bg-slate-800 border-slate-600">
-            <CardHeader>
-              <CardTitle className="text-slate-100">我的权限</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div>
-                  <p className="text-sm text-slate-400 mb-2">角色</p>
-                  <div className="flex flex-wrap gap-2">
-                    {user?.roles.map(role => (
-                      <Badge key={role} variant="outline" className="bg-blue-900/50 text-blue-300 border-blue-700">
-                        {role.replace('ROLE_', '')}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-sm text-slate-400 mb-2">权限列表</p>
-                  {user?.permissions && user.permissions.length > 0 ? (
+          <div className="space-y-4">
+            <Card className="bg-slate-800 border-slate-600">
+              <CardHeader>
+                <CardTitle className="text-slate-100">我的权限</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-sm text-slate-400 mb-2">角色</p>
                     <div className="flex flex-wrap gap-2">
-                      {user.permissions.map(perm => (
-                        <Badge key={perm} variant="outline" className="bg-green-900/30 text-green-300 border-green-700">
-                          {perm}
+                      {user?.roles.map(role => (
+                        <Badge key={role} variant="outline" className={lightTagClass}>
+                          {role.replace('ROLE_', '')}
                         </Badge>
                       ))}
                     </div>
-                  ) : (
-                    <p className="text-slate-500">暂无权限信息</p>
-                  )}
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-400 mb-2">权限列表</p>
+                    {user?.permissions && user.permissions.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {user.permissions.map(perm => (
+                          <Badge key={perm} variant="outline" className={lightTagClass}>
+                            {perm}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-slate-500">暂无权限信息</p>
+                    )}
+                  </div>
+                  <div className="pt-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => user && setShowPasswordModal({ userId: user.id!, username: user.username })}
+                      className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                    >
+                      <Key className="w-4 h-4 mr-2" />
+                      修改密码
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         )}
       </div>
 
@@ -598,8 +720,8 @@ const AccountManagement: React.FC = () => {
                       }}
                       className={`px-3 py-1 rounded text-sm border ${
                         newUser.roles.includes(role.name)
-                          ? 'bg-blue-600 border-blue-500 text-white'
-                          : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
+                          ? selectableTagActiveClass
+                          : selectableTagClass
                       }`}
                     >
                       {role.name.replace('ROLE_', '')}
@@ -621,8 +743,8 @@ const AccountManagement: React.FC = () => {
                       }}
                       className={`px-3 py-1 rounded text-sm border ${
                         newUser.departmentIds.includes(dept.id)
-                          ? 'bg-green-600 border-green-500 text-white'
-                          : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
+                          ? 'bg-blue-100 border-blue-300 text-slate-900'
+                          : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
                       }`}
                     >
                       {dept.deptName}
@@ -693,8 +815,8 @@ const AccountManagement: React.FC = () => {
                     }}
                     className={`px-3 py-1 rounded text-sm border ${
                       selectedRoles.includes(role.name)
-                        ? 'bg-blue-600 border-blue-500 text-white'
-                        : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
+                        ? selectableTagActiveClass
+                        : selectableTagClass
                     }`}
                   >
                     {role.name.replace('ROLE_', '')}
@@ -726,10 +848,10 @@ const AccountManagement: React.FC = () => {
                 {permissions.map(perm => (
                   <label
                     key={perm.name}
-                    className={`flex items-center gap-3 p-3 rounded border cursor-pointer transition ${
+                      className={`flex items-center gap-3 p-3 rounded border cursor-pointer transition ${
                       selectedPermissions.includes(perm.name)
-                        ? 'bg-blue-900/30 border-blue-700'
-                        : 'bg-slate-700/50 border-slate-600 hover:bg-slate-700'
+                          ? 'bg-blue-100 border-blue-300 text-slate-900'
+                          : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
                     }`}
                   >
                     <input
@@ -744,9 +866,9 @@ const AccountManagement: React.FC = () => {
                       }}
                       className="w-4 h-4 accent-blue-600"
                     />
-                    <div>
-                      <p className="text-sm font-medium">{perm.name}</p>
-                      <p className="text-xs text-slate-400">{perm.description}</p>
+                      <div>
+                        <p className="text-sm font-medium">{perm.name}</p>
+                        <p className="text-xs text-slate-500">{perm.description}</p>
                     </div>
                   </label>
                 ))}
@@ -829,8 +951,8 @@ const AccountManagement: React.FC = () => {
                     <tr key={member.id} className="border-b border-slate-700 hover:bg-slate-700/50">
                       <td className="p-2 font-medium">
                         {member.username}
-                        {showDeptDetail.headUserId === member.id && (
-                          <Badge variant="outline" className="ml-2 bg-yellow-900/30 text-yellow-300 border-yellow-700 text-xs">
+                  {showDeptDetail.headUserId === member.id && (
+                          <Badge variant="outline" className="ml-2 bg-slate-100 text-slate-700 border-slate-300 text-xs">
                             负责人
                           </Badge>
                         )}
@@ -839,7 +961,7 @@ const AccountManagement: React.FC = () => {
                       <td className="p-2">
                         <div className="flex flex-wrap gap-1">
                           {member.roles.map(role => (
-                            <Badge key={role} variant="outline" className="bg-purple-900/30 text-purple-300 border-purple-700 text-xs">
+                            <Badge key={role} variant="outline" className={lightTagClassXs}>
                               {role.replace('ROLE_', '')}
                             </Badge>
                           ))}
@@ -882,6 +1004,35 @@ const AccountManagement: React.FC = () => {
                 </tbody>
               </table>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 修改部门名称弹窗 */}
+      {showEditDept && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-600">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">修改部门名称 - {showEditDept.deptName}</h3>
+              <button onClick={() => { setShowEditDept(null); setEditDeptName(''); }} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">部门名称</label>
+                <Input
+                  value={editDeptName}
+                  onChange={e => setEditDeptName(e.target.value)}
+                  className="bg-slate-700 border-slate-600 text-white"
+                  placeholder="请输入部门名称"
+                />
+              </div>
+              <Button onClick={handleUpdateDepartment} className="w-full bg-blue-600 hover:bg-blue-700">
+                <Save className="w-4 h-4 mr-2" />
+                保存修改
+              </Button>
+            </div>
           </div>
         </div>
       )}

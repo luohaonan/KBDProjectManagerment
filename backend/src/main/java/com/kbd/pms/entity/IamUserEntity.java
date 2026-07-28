@@ -7,7 +7,6 @@ import java.time.Instant;
 @Table(name = "iam_user")
 public class IamUserEntity {
   @Id
-  @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
 
   @Column(name = "user_no", nullable = false, length = 32)
@@ -34,9 +33,10 @@ public class IamUserEntity {
   @Column(name = "updated_at", nullable = false)
   private Instant updatedAt;
 
-  protected IamUserEntity() {}
+  public IamUserEntity() {}
 
   public Long getId() { return id; }
+  public void setId(Long id) { this.id = id; }
   public String getUserNo() { return userNo; }
   public void setUserNo(String userNo) { this.userNo = userNo; }
   public String getDisplayName() { return displayName; }
@@ -50,6 +50,8 @@ public class IamUserEntity {
   public Boolean getIsActive() { return isActive; }
   public void setIsActive(Boolean active) { isActive = active; }
   public Instant getCreatedAt() { return createdAt; }
+  public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
   public Instant getUpdatedAt() { return updatedAt; }
+  public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 }
 

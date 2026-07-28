@@ -22,6 +22,7 @@ import com.kbd.pms.repository.BudgetLimitRepository;
 import com.kbd.pms.repository.DocumentRepository;
 import com.kbd.pms.repository.IamUserRepository;
 import com.kbd.pms.repository.MilestoneDefRepository;
+import com.kbd.pms.repository.MilestoneDeptRoleRepository;
 import com.kbd.pms.repository.MilestoneHistoryRepository;
 import com.kbd.pms.repository.OrgDepartmentRepository;
 import com.kbd.pms.repository.ProjectBudgetLedgerRepository;
@@ -43,9 +44,19 @@ import com.kbd.pms.repository.InitiationApprovalRepository;
 import com.kbd.pms.entity.ReviewApprovalTaskEntity;
 import com.kbd.pms.entity.InitiationApprovalTaskEntity;
 import com.kbd.pms.entity.InitiationApprovalEntity;
+import com.kbd.pms.entity.ReviewApprovalEntity;
+import com.kbd.pms.workflow.WfProcessDefinition;
+import com.kbd.pms.workflow.WfProcessNode;
+import com.kbd.pms.workflow.WfProcessRepository;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.time.Instant;
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,9 +64,12 @@ import org.springframework.transaction.annotation.Transactional;
 @SuppressWarnings("null")
 public class ProjectService {
 
+  private static final Logger log = LoggerFactory.getLogger(ProjectService.class);
+
   private final ProjectRepository projectRepository;
   private final ProjectLevelRepository projectLevelRepository;
   private final MilestoneDefRepository milestoneDefRepository;
+  private final MilestoneDeptRoleRepository milestoneDeptRoleRepository;
   private final ProjectMilestoneRepository projectMilestoneRepository;
   private final ProjectBudgetPolicyRepository projectBudgetPolicyRepository;
   private final ProjectBudgetSnapshotRepository projectBudgetSnapshotRepository;
@@ -76,12 +90,16 @@ public class ProjectService {
   private final ReviewApprovalTaskRepository reviewApprovalTaskRepository;
   private final InitiationApprovalTaskRepository initiationApprovalTaskRepository;
   private final InitiationApprovalRepository initiationApprovalRepository;
+  private final WfProcessRepository wfProcessRepository;
   private final SecurityHelper securityHelper;
+  private final com.kbd.pms.repository.UserRepository userRepository;
+  private final NotificationService notificationService;
 
   public ProjectService(
       ProjectRepository projectRepository,
       ProjectLevelRepository projectLevelRepository,
       MilestoneDefRepository milestoneDefRepository,
+      MilestoneDeptRoleRepository milestoneDeptRoleRepository,
       ProjectMilestoneRepository projectMilestoneRepository,
       ProjectBudgetPolicyRepository projectBudgetPolicyRepository,
       ProjectBudgetSnapshotRepository projectBudgetSnapshotRepository,
@@ -102,10 +120,14 @@ public class ProjectService {
       ReviewApprovalTaskRepository reviewApprovalTaskRepository,
       InitiationApprovalTaskRepository initiationApprovalTaskRepository,
       InitiationApprovalRepository initiationApprovalRepository,
-      SecurityHelper securityHelper) {
+      WfProcessRepository wfProcessRepository,
+      SecurityHelper securityHelper,
+      com.kbd.pms.repository.UserRepository userRepository,
+      NotificationService notificationService) {
     this.projectRepository = projectRepository;
     this.projectLevelRepository = projectLevelRepository;
     this.milestoneDefRepository = milestoneDefRepository;
+    this.milestoneDeptRoleRepository = milestoneDeptRoleRepository;
     this.projectMilestoneRepository = projectMilestoneRepository;
     this.projectBudgetPolicyRepository = projectBudgetPolicyRepository;
     this.projectBudgetSnapshotRepository = projectBudgetSnapshotRepository;
@@ -126,7 +148,10 @@ public class ProjectService {
     this.reviewApprovalTaskRepository = reviewApprovalTaskRepository;
     this.initiationApprovalTaskRepository = initiationApprovalTaskRepository;
     this.initiationApprovalRepository = initiationApprovalRepository;
+    this.wfProcessRepository = wfProcessRepository;
     this.securityHelper = securityHelper;
+    this.userRepository = userRepository;
+    this.notificationService = notificationService;
   }
 
   @Transactional
@@ -156,6 +181,15 @@ public class ProjectService {
     String projectCode = level.getLevelCode() + "-" + projectNo;
     if (projectRepository.findByProjectCode(projectCode).isPresent()) {
       throw new ApiException(409, "项目编号冲突，请重试: " + projectCode);
+    }
+
+    // ===== 确保所有需要引用 iam_user 外键的用户ID都在 iam_user 表中存在 =====
+    // 1. 当前登录用户（创建者）
+    Long iamUserId = securityHelper.getCurrentUserId(); // user表与iam_user表的ID设计为一致
+    ensureIamUserExists(iamUserId, username);
+    // 2. 项目经理（pmUserId）——如果不同且未同步，也自动同步
+    if (request.pmUserId() != null && !request.pmUserId().equals(iamUserId)) {
+      ensureIamUserExists(request.pmUserId(), null);
     }
 
     Instant now = Instant.now();
@@ -204,8 +238,9 @@ public class ProjectService {
       // PM 自己创建或有完整信息，直接 ACTIVE
       project.setStatus(Enums.ProjectStatus.ACTIVE);
     }
-    project.setCreatedBy(request.createdByUserId());
-    project.setUpdatedBy(request.createdByUserId());
+    // 使用服务端安全上下文获取的当前用户ID，而非客户端传值
+    project.setCreatedBy(iamUserId);
+    project.setUpdatedBy(iamUserId);
     project.setCreatedAt(now);
     project.setUpdatedAt(now);
 
@@ -273,7 +308,8 @@ public class ProjectService {
     project.setRiskRegulatory(request.riskRegulatory());
     project.setSuggestionAndSupport(request.suggestionAndSupport());
     // 如果项目处于 DRAFT 状态且 PM 完善了信息（有 indication），自动转为 ACTIVE
-    if (project.getStatus() == Enums.ProjectStatus.DRAFT
+    boolean wasDraft = project.getStatus() == Enums.ProjectStatus.DRAFT;
+    if (wasDraft
         && request.indication() != null
         && !request.indication().isEmpty()) {
       project.setStatus(Enums.ProjectStatus.ACTIVE);
@@ -282,6 +318,16 @@ public class ProjectService {
     project.setUpdatedAt(Instant.now());
 
     projectRepository.save(project);
+
+    // 触发器：项目从 DRAFT 转为 ACTIVE → 通知当前里程碑（G0）的上传部门执行人
+    if (wasDraft && project.getStatus() == Enums.ProjectStatus.ACTIVE) {
+      try {
+        notifyExecutorsForProjectActivation(project);
+      } catch (Exception e) {
+        // 通知发送失败不应影响主业务流程，但记录日志用于调试
+        log.error("通知发送失败: projectId={}", project.getId(), e);
+      }
+    }
 
     return getProjectDetail(projectId, username);
   }
@@ -300,9 +346,21 @@ public class ProjectService {
 
     // 级联删除所有关联子表记录（按外键依赖顺序，先删有外键引用的子表）
     reviewRecordRepository.deleteByProjectId(projectId);
+    // 先删 review_approval_task（子表），再删 review_approval（父表）
+    List<ReviewApprovalEntity> reviewApprovals = reviewApprovalRepository.findByProjectIdOrderByCreatedAtDesc(projectId);
+    for (ReviewApprovalEntity ra : reviewApprovals) {
+      reviewApprovalTaskRepository.deleteByReviewApprovalId(ra.getId());
+    }
     reviewApprovalRepository.deleteByProjectId(projectId);
+    // 先删 initiation_approval_task（子表），再删 initiation_approval（父表）
+    List<InitiationApprovalEntity> initiationApprovals = initiationApprovalRepository.findByProjectIdOrderByCreatedAtDesc(projectId);
+    for (InitiationApprovalEntity ia : initiationApprovals) {
+      initiationApprovalTaskRepository.deleteByInitiationApprovalId(ia.getId());
+    }
+    initiationApprovalRepository.deleteByProjectId(projectId);
     projectTerminationTaskRepository.deleteByProjectId(projectId);
     projectTeamMemberRepository.deleteByProjectId(projectId);
+    milestoneHistoryRepository.deleteByProjectId(projectId);
     projectMilestoneRepository.deleteByProjectId(projectId);
     projectDocumentRepository.deleteByProjectId(projectId);
     projectChangeRequestRepository.deleteByProjectId(projectId);
@@ -310,7 +368,6 @@ public class ProjectService {
     projectBudgetPlanRepository.deleteByProjectId(projectId);
     projectBudgetPolicyRepository.deleteByProjectId(projectId);
     projectBudgetLedgerRepository.deleteByProjectId(projectId);
-    milestoneHistoryRepository.deleteByProjectId(projectId);
     documentRepository.deleteByProjectId(projectId);
     budgetLimitRepository.deleteByProjectId(projectId);
 
@@ -349,11 +406,13 @@ public class ProjectService {
     CurrentMilestoneDto milestoneDto = null;
     String lifecyclePhaseLabel = null;
     if (currentMilestone != null) {
+      List<String> executorDeptNames = buildExecutorDeptNames(currentMilestone.getMilestoneCode());
       milestoneDto =
           new CurrentMilestoneDto(
               currentMilestone.getMilestoneCode(),
               currentMilestone.getMilestoneName(),
-              currentMilestone.getMilestoneCode() + "-" + currentMilestone.getMilestoneName());
+              currentMilestone.getMilestoneCode() + "-" + currentMilestone.getMilestoneName(),
+              executorDeptNames);
       lifecyclePhaseLabel = milestoneDto.phaseLabel();
     }
 
@@ -402,6 +461,40 @@ public class ProjectService {
         oversightDto,
         milestoneDto,
         budgetDto);
+  }
+
+  /**
+   * 根据里程碑代码从流程引擎配置中获取执行部门名称列表（上传节点对应的部门）。
+   */
+  private List<String> buildExecutorDeptNames(String milestoneCode) {
+    if (milestoneCode == null || milestoneCode.isEmpty()) {
+      return List.of();
+    }
+    WfProcessDefinition def = wfProcessRepository
+        .findByProcessTypeAndMilestoneCodeAndIsActiveTrue("MILESTONE", milestoneCode)
+        .orElse(null);
+    if (def == null) {
+      return List.of();
+    }
+    List<String> deptNames = new ArrayList<>();
+    for (WfProcessNode node : def.getNodes()) {
+      if (Boolean.TRUE.equals(node.getIsUploader()) && node.getApproverValue() != null) {
+        Arrays.stream(node.getApproverValue().split(","))
+            .map(String::trim)
+            .filter(s -> !s.isEmpty())
+            .forEach(deptIdStr -> {
+              try {
+                Long deptId = Long.parseLong(deptIdStr);
+                orgDepartmentRepository.findById(deptId)
+                    .map(OrgDepartmentEntity::getDeptName)
+                    .ifPresent(deptNames::add);
+              } catch (NumberFormatException e) {
+                // 忽略无效的部门ID
+              }
+            });
+      }
+    }
+    return deptNames;
   }
 
   private BudgetExecutionSummaryDto buildBudgetSummary(long projectId) {
@@ -522,11 +615,13 @@ public class ProjectService {
     CurrentMilestoneDto milestoneDto = null;
     String lifecyclePhaseLabel = null;
     if (currentMilestone != null) {
+      List<String> executorDeptNames = buildExecutorDeptNames(currentMilestone.getMilestoneCode());
       milestoneDto =
           new CurrentMilestoneDto(
               currentMilestone.getMilestoneCode(),
               currentMilestone.getMilestoneName(),
-              currentMilestone.getMilestoneCode() + "-" + currentMilestone.getMilestoneName());
+              currentMilestone.getMilestoneCode() + "-" + currentMilestone.getMilestoneName(),
+              executorDeptNames);
       lifecyclePhaseLabel = milestoneDto.phaseLabel();
     }
 
@@ -642,9 +737,102 @@ public class ProjectService {
     );
   }
 
+  /**
+   * 确保指定用户ID在 iam_user 表中存在记录，如果不存在则自动从 user 表同步创建
+   */
+  private void ensureIamUserExists(Long userId, String username) {
+    if (iamUserRepository.findById(userId).isPresent()) {
+      return;
+    }
+    com.kbd.pms.entity.User user = null;
+    if (username != null) {
+      var opt = userService.findByUsername(username);
+      if (opt.isPresent()) {
+        user = opt.get();
+      }
+    } else {
+      // 通过 userId 从 userRepository 查找（直接通过ID查询）
+      var opt = userRepository.findById(userId);
+      if (opt.isPresent()) {
+        user = opt.get();
+        username = user.getUsername();
+      }
+    }
+    if (user == null) {
+      return; // user 表中也没有该用户，跳过
+    }
+    IamUserEntity newIamUser = new IamUserEntity();
+    newIamUser.setId(userId);
+    newIamUser.setUserNo(username);
+    newIamUser.setDisplayName(username);
+    newIamUser.setEmail(user.getEmail());
+    newIamUser.setIsActive(Boolean.TRUE);
+    newIamUser.setCreatedAt(Instant.now());
+    newIamUser.setUpdatedAt(Instant.now());
+    iamUserRepository.save(newIamUser);
+  }
+
   private String allocateNextProjectNo() {
     Long max = projectRepository.findMaxKbdNumericSuffix();
     long next = (max == null ? 0L : max) + 1L;
     return "KBD" + String.format("%04d", next);
+  }
+
+  /**
+   * 触发器：项目从 DRAFT 转为 ACTIVE → 通知当前里程碑的上传部门执行人
+   */
+  private void notifyExecutorsForProjectActivation(ProjectEntity project) {
+    // 查询当前里程碑定义
+    MilestoneDefEntity currentMilestone = milestoneDefRepository
+        .findById(project.getCurrentMilestoneId())
+        .orElse(null);
+    if (currentMilestone == null) {
+      log.debug("未找到当前里程碑定义，跳过通知: projectId={}", project.getId());
+      return;
+    }
+
+    String milestoneCode = currentMilestone.getMilestoneCode();
+    String milestoneName = currentMilestone.getMilestoneName();
+    if (milestoneCode == null) {
+      log.debug("里程碑代码为空，跳过通知: projectId={}", project.getId());
+      return;
+    }
+
+    // 从流程引擎获取上传节点对应的部门ID
+    WfProcessDefinition def = wfProcessRepository
+        .findByProcessTypeAndMilestoneCodeAndIsActiveTrue("MILESTONE", milestoneCode)
+        .orElse(null);
+    if (def == null) {
+      log.debug("未找到里程碑 {} 的流程定义，跳过通知: projectId={}", milestoneCode, project.getId());
+      return;
+    }
+
+    log.info("项目激活通知: projectCode={}, milestone={}, processDefId={}, nodes={}",
+        project.getProjectCode(), milestoneCode, def.getId(), def.getNodes().size());
+
+    String title = "项目已完善";
+    String content = "[" + project.getProjectName() + "] 项目信息已完善，请上传 " + milestoneName + " 阶段交付物";
+
+    Set<Long> notifiedDeptIds = new HashSet<>();
+    for (WfProcessNode node : def.getNodes()) {
+      log.debug("节点检查: code={}, isUploader={}, approverValue={}",
+          node.getNodeCode(), node.getIsUploader(), node.getApproverValue());
+      if (Boolean.TRUE.equals(node.getIsUploader()) && node.getApproverValue() != null) {
+        for (String deptIdStr : node.getApproverValue().split(",")) {
+          try {
+            Long deptId = Long.parseLong(deptIdStr.trim());
+            log.debug("向部门 {} 的执行人发送通知: projectId={}", deptId, project.getId());
+            if (notifiedDeptIds.add(deptId)) {
+              notificationService.sendNotificationToDeptExecutors(
+                  deptId, "PROJECT_COMPLETION", title, content,
+                  project.getId(), milestoneCode, null, true);
+            }
+          } catch (NumberFormatException e) {
+            log.debug("无效的部门ID: {}, projectId={}", deptIdStr, project.getId());
+          }
+        }
+      }
+    }
+    log.info("项目激活通知发送完成: projectId={}, 涉及部门数={}", project.getId(), notifiedDeptIds.size());
   }
 }

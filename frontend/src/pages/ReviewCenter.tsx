@@ -9,8 +9,9 @@ import api from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 interface PendingTodoItem {
-  /** 任务类型: PROJECT_COMPLETION / MILESTONE / INITIATION */
-  todoType: 'PROJECT_COMPLETION' | 'MILESTONE' | 'INITIATION';
+  /** 任务类型: PROJECT_COMPLETION(完善项目信息) / DELIVERABLE(上传交付物) / MILESTONE / INITIATION */
+  todoType: 'PROJECT_COMPLETION' | 'DELIVERABLE' | 'MILESTONE' | 'INITIATION';
+  notificationId?: number;
   taskId?: number;
   reviewApprovalId?: number;
   projectId: number;
@@ -63,6 +64,9 @@ const resultBadgeMap: Record<string, { label: string; color: string }> = {
   REJECTED: { label: '未通过', color: 'bg-red-600' },
 };
 
+const reviewTabClass = 'rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none hover:bg-slate-100';
+const reviewTabActiveClass = 'data-[state=active]:bg-blue-100 data-[state=active]:text-slate-900 data-[state=active]:border-blue-300';
+
 const ReviewCenter: React.FC = () => {
   const navigate = useNavigate();
   const { user, hasRole } = useAuth();
@@ -75,10 +79,28 @@ const ReviewCenter: React.FC = () => {
   const loadPendingTodos = async () => {
     setLoadingPending(true);
     try {
+      const notificationRes = await api.get('/api/notifications/pending-todos');
+      const notificationResult = notificationRes.data as { code: number; data: any[]; message?: string };
+
       // 加载里程碑评审待办
       const reviewRes = await api.get('/api/reviews/pending-tasks');
       const reviewResult = reviewRes.data as { code: number; data: any[]; message?: string };
       const todos: PendingTodoItem[] = [];
+
+      if (notificationResult.code === 200 || notificationResult.code === 0) {
+        for (const item of (notificationResult.data || [])) {
+          todos.push({
+            notificationId: item.id,
+            todoType: item.type === 'INITIATION' ? 'INITIATION' : 'DELIVERABLE',
+            projectId: item.projectId,
+            projectName: extractProjectName(item.title, item.content),
+            projectCode: '',
+            milestoneName: item.milestoneCode ? `${item.milestoneCode}阶段` : undefined,
+            milestoneCode: item.milestoneCode,
+            submittedAt: item.createdAt,
+          });
+        }
+      }
 
       if (reviewResult.code === 200 || reviewResult.code === 0) {
         for (const task of (reviewResult.data || [])) {
@@ -129,6 +151,12 @@ const ReviewCenter: React.FC = () => {
     }
   };
 
+  const extractProjectName = (title?: string, content?: string) => {
+    const text = `${title || ''} ${content || ''}`;
+    const match = text.match(/\[(.+?)\]/);
+    return match?.[1] || '待处理项目';
+  };
+
   const loadHistory = async () => {
     setLoadingHistory(true);
     try {
@@ -173,6 +201,8 @@ const ReviewCenter: React.FC = () => {
     if (todo.todoType === 'PROJECT_COMPLETION') {
       // 项目完善 - 跳转到创建项目页面填写剩余字段
       navigate(`/create-project?projectId=${todo.projectId}&mode=complete`);
+    } else if (todo.todoType === 'DELIVERABLE') {
+      navigate(`/project/${todo.projectId}?tab=milestone`);
     } else if (todo.todoType === 'INITIATION') {
       navigate(`/project/${todo.projectId}?tab=overview&openInitiation=true`);
     } else {
@@ -191,18 +221,22 @@ const ReviewCenter: React.FC = () => {
     if (todo.approverRole === 'ROLE_PMC') return 'PMC决策';
     if (todo.approverRole === 'ROLE_PM') return 'PM技术初评';
     if (todo.approverRole === 'ROLE_DEPT_HEAD') return '部门负责人审批';
-    if (todo.approverRole === 'ROLE_COMPLIANCE') return '合规意见';
+    if (todo.approverRole === 'DEPT_HEAD') return '部门负责人审批';
     return todo.approverRole;
   };
 
   const getActionLabel = (todo: PendingTodoItem) => {
     if (todo.todoType === 'PROJECT_COMPLETION') return '完善项目信息';
+    if (todo.todoType === 'DELIVERABLE') return '上传交付物';
     return '去评审';
   };
 
   const getTypeBadge = (todo: PendingTodoItem) => {
     if (todo.todoType === 'PROJECT_COMPLETION') {
       return <Badge className="bg-purple-600 text-white text-xs">项目新建</Badge>;
+    }
+    if (todo.todoType === 'DELIVERABLE') {
+      return <Badge className="bg-cyan-600 text-white text-xs">交付物上传</Badge>;
     }
     if (todo.todoType === 'INITIATION') {
       return <Badge className="bg-indigo-600 text-white text-xs">项目立项</Badge>;
@@ -212,6 +246,7 @@ const ReviewCenter: React.FC = () => {
 
   // 分三类统计
   const projectCompletionCount = pendingTodos.filter(t => t.todoType === 'PROJECT_COMPLETION').length;
+  const deliverableCount = pendingTodos.filter(t => t.todoType === 'DELIVERABLE').length;
   const initiationCount = pendingTodos.filter(t => t.todoType === 'INITIATION').length;
   const milestoneCount = pendingTodos.filter(t => t.todoType === 'MILESTONE').length;
 
@@ -236,7 +271,7 @@ const ReviewCenter: React.FC = () => {
               查看和管理您的待办任务
               {pendingTodos.length > 0 && (
                 <span className="ml-2">
-                  （项目新建 {projectCompletionCount}个 / 项目立项 {initiationCount}个 / 里程碑评审 {milestoneCount}个）
+                  （项目新建 {projectCompletionCount}个 / 交付物上传 {deliverableCount}个 / 项目立项 {initiationCount}个 / 里程碑评审 {milestoneCount}个）
                 </span>
               )}
             </p>
@@ -244,10 +279,10 @@ const ReviewCenter: React.FC = () => {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-6 bg-slate-800 border border-slate-600">
+          <TabsList className="mb-6 flex h-auto flex-wrap justify-start gap-2 rounded-lg border-0 bg-white p-2 shadow-sm">
             <TabsTrigger
               value="pending"
-              className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-300"
+              className={`${reviewTabClass} ${reviewTabActiveClass}`}
             >
               <Clock className="w-4 h-4 mr-2" />
               待办事项
@@ -259,7 +294,7 @@ const ReviewCenter: React.FC = () => {
             </TabsTrigger>
             <TabsTrigger
               value="history"
-              className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-300"
+              className={`${reviewTabClass} ${reviewTabActiveClass}`}
             >
               <History className="w-4 h-4 mr-2" />
               已办事项
@@ -333,12 +368,20 @@ const ReviewCenter: React.FC = () => {
                             {todo.todoType === 'PROJECT_COMPLETION' && (
                               <span>项目管理员已创建此项目，请尽快完善项目信息</span>
                             )}
+                            {todo.todoType === 'DELIVERABLE' && (
+                              <span>流程已流转到当前阶段，请尽快上传交付物</span>
+                            )}
                           </div>
                           <div className="flex items-center text-blue-400 text-sm">
                             {todo.todoType === 'PROJECT_COMPLETION' ? (
                               <>
                                 <FileEdit className="w-4 h-4 mr-1" />
                                 <span>完善项目信息</span>
+                              </>
+                            ) : todo.todoType === 'DELIVERABLE' ? (
+                              <>
+                                <FileText className="w-4 h-4 mr-1" />
+                                <span>上传交付物</span>
                               </>
                             ) : (
                               <>

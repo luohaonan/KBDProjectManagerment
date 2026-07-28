@@ -281,7 +281,6 @@ public class WfProcessService {
             case "DEPT_HEAD_APPROVE" -> "DEPT_HEAD_APPROVE";
             case "ROLE_APPROVE" -> {
                 if ("ROLE_PM".equals(node.getApproverRule())) yield "PM_TECH_REVIEW";
-                if ("ROLE_COMPLIANCE".equals(node.getApproverRule())) yield "COMPLIANCE_OPINION";
                 yield "ROLE_APPROVE";
             }
             case "DECISION" -> {
@@ -306,19 +305,6 @@ public class WfProcessService {
                     List<Long> pmcIds = governanceCommitteeMemberRepository
                             .findActiveMemberIds(project.getPmcCommitteeId(), LocalDate.now(ZoneOffset.UTC));
                     ids.addAll(pmcIds);
-                }
-                break;
-            case "ROLE_COMPLIANCE":
-                List<User> cu = userRepository.findActiveUsersByPermissionName("ROLE_COMPLIANCE");
-                if (cu.isEmpty()) {
-                    OrgDepartmentEntity d = orgDepartmentRepository.findById(7L).orElse(null);
-                    if (d != null && d.getHeadUserId() != null) {
-                        ids.add(d.getHeadUserId());
-                    }
-                } else {
-                    for (User u : cu) {
-                        ids.add(u.getId());
-                    }
                 }
                 break;
             case "DEPT_HEAD":

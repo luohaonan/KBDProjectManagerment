@@ -12,6 +12,9 @@ import Login from './pages/Login';
 import AccountManagement from './pages/AccountManagement';
 import ReviewCenter from './pages/ReviewCenter';
 import WorkflowManager from './pages/WorkflowManager';
+import NotificationCenter from './pages/NotificationCenter';
+import NotificationBell from './components/NotificationBell';
+import EmailConfig from './pages/EmailConfig';
 import { Button } from './components/ui/button';
 
 const AppContent: React.FC = () => {
@@ -33,13 +36,19 @@ const AppContent: React.FC = () => {
                 <span className="font-medium">{user?.username}</span>
                 {user?.departments?.length ? ` | ${user.departments.join(', ')}` : ''}
               </div>
+              <NotificationBell />
               <Button variant="outline" size="sm" onClick={handleAccountManagement}>
                 账号管理
               </Button>
               {hasRole('ROLE_ADMIN') && (
-                <Button variant="outline" size="sm" onClick={() => navigate('/workflow-manager')}>
-                  流程管理
-                </Button>
+                <>
+                  <Button variant="outline" size="sm" onClick={() => navigate('/workflow-manager')}>
+                    流程管理
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => navigate('/email-config')}>
+                    邮件配置
+                  </Button>
+                </>
               )}
               <Button variant="outline" size="sm" onClick={logout}>
                 退出登录
@@ -113,6 +122,22 @@ const AppContent: React.FC = () => {
           element={
             <ProtectedRoute roles={['ROLE_ADMIN']}>
               <WorkflowManager />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/notifications"
+          element={
+            <ProtectedRoute>
+              <NotificationCenter />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/email-config"
+          element={
+            <ProtectedRoute>
+              <EmailConfig />
             </ProtectedRoute>
           }
         />

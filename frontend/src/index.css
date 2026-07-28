@@ -1,3 +1,165 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ========== 全局浅色主题覆盖 ========== */
+
+/* 页面容器 */
+.min-h-screen.bg-slate-900 {
+  background-color: #f8fafc !important;
+}
+.min-h-screen.bg-slate-900.text-white {
+  background-color: #f8fafc !important;
+  color: #1e293b !important;
+}
+
+/* 卡片背景 */
+.bg-slate-800 {
+  background-color: #ffffff !important;
+}
+
+/* 卡片内标题 */
+.text-slate-100 { color: #1e293b !important; }
+.text-slate-200 { color: #334155 !important; }
+.text-slate-300 { color: #475569 !important; }
+.text-slate-400 { color: #64748b !important; }
+.text-slate-500 { color: #64748b !important; }
+
+/* 各类输入框和文本域 */
+.bg-slate-700 { background-color: #ffffff !important; }
+.bg-slate-700.border-slate-600 {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #1e293b !important;
+}
+.placeholder-slate-400::placeholder { color: #94a3b8 !important; }
+
+/* 边框 */
+.border-slate-600 { border-color: #e2e8f0 !important; }
+.border-slate-700 { border-color: #e2e8f0 !important; }
+
+/* 标签页/面板背景 */
+.bg-slate-900.border-slate-700,
+.bg-slate-900.p-4,
+.rounded-lg.border.border-slate-700.bg-slate-900 {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* 下拉菜单 */
+.bg-slate-800.border-slate-600.max-h-60 {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* 暗色按钮覆盖 */
+.bg-slate-700.text-slate-100.border-slate-600,
+.bg-slate-800.text-slate-100.border-slate-600 {
+  background-color: #f1f5f9 !important;
+  color: #1e293b !important;
+  border-color: #cbd5e1 !important;
+}
+.bg-slate-700.text-slate-100.border-slate-600:hover,
+.bg-slate-800.text-slate-100.border-slate-600:hover {
+  background-color: #e2e8f0 !important;
+}
+
+/* 表格 */
+.bg-slate-750 { background-color: #f8fafc !important; }
+.hover\:bg-slate-700:hover { background-color: #f1f5f9 !important; }
+.bg-slate-700.rounded { background-color: #f8fafc !important; }
+
+/* 信息块 */
+.p-3.bg-slate-700.rounded,
+.p-4.bg-slate-700.rounded {
+  background-color: #f1f5f9 !important;
+}
+
+/* 标签页 tabs 容器 */
+.bg-slate-800.border.border-slate-600 {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* 数据表 */
+.bg-slate-900.text-sm { background-color: #ffffff !important; color: #1e293b !important; }
+.bg-slate-800.text-slate-300 { background-color: #f8fafc !important; color: #475569 !important; }
+.divide-slate-700 > :not([hidden]) ~ :not([hidden]) { border-color: #e2e8f0 !important; }
+.bg-slate-800.rounded { background-color: #f1f5f9 !important; }
+
+/* ========== 项目管道颜色 ========== */
+.bg-slate-600 { background-color: #e2e8f0 !important; }
+.bg-gray-400  { background-color: #93c5fd !important; }
+
+/* ========== 1. 按钮颜色：绿色/蓝色 → 浅色边框 ========== */
+.bg-green-600 {
+  background-color: #f1f5f9 !important;
+  color: #1e293b !important;
+  border: 1px solid #cbd5e1 !important;
+}
+.bg-green-600:hover { background-color: #e2e8f0 !important; }
+
+.bg-blue-600 {
+  background-color: #f1f5f9 !important;
+  color: #1e293b !important;
+  border: 1px solid #cbd5e1 !important;
+}
+.bg-blue-600:hover { background-color: #e2e8f0 !important; }
+
+/* 红色/黄色按钮（如删除确认、条件通过等）保持原样 */
+
+/* ========== 2. 项目管道分隔线 ========== */
+.mb-6.p-4.bg-slate-700.rounded {
+  background-color: #ffffff !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+/* ========== 4. Badge：全部改为浅蓝框黑字（与权限编辑弹窗选中的权限一致） ========== */
+.bg-green-600.text-white,
+.bg-blue-600.text-white,
+.bg-red-600.text-white,
+.bg-yellow-600.text-white,
+.bg-purple-600.text-white,
+.bg-indigo-600.text-white,
+.bg-slate-500.text-white {
+  background-color: #dbeafe !important;
+  color: #1e40af !important;
+  border: 1px solid #93c5fd !important;
+}
+
+/* ========== 5/6. Tabs：完全复制账号管理风格 ========== */
+/* Tabs 容器保留浅灰底（与账号管理一致） */
+.bg-slate-800.border.border-slate-600 {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* 选中的 TabTrigger - 浅蓝底 + 深蓝字 */
+.data-\[state\=active\]\:bg-slate-700 {
+  background-color: #dbeafe !important;
+  color: #1e40af !important;
+  border: 1px solid #93c5fd !important;
+  border-radius: 6px !important;
+}
+.data-\[state\=active\]\:text-white {
+  color: #1e40af !important;
+}
+
+/* 未选中的 TabTrigger - 保持组件默认白色底 */
+.data-\[state\=inactive\]\:text-slate-300 {
+  color: #64748b !important;
+}
+
+/* ========== 7. 流程管理节点文字黑色 ========== */
+.text-white.truncate {
+  color: #1e293b !important;
+}
+
+/* ========== 模态框 ========== */
+.fixed.inset-0 .bg-slate-800.rounded-lg {
+  background-color: #ffffff !important;
+}
+.fixed.inset-0 .text-white,
+.fixed.inset-0 .hover\:text-white:hover {
+  color: #1e293b !important;
+}

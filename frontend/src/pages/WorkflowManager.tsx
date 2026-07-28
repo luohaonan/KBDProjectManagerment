@@ -25,7 +25,8 @@ interface ProcessDefinition {
 }
 
 /* ========== constants ========== */
-const NODE_COLORS: Record<string, string> = { UPLOAD: 'bg-blue-600', DEPT_HEAD_APPROVE: 'bg-orange-600', ROLE_APPROVE: 'bg-purple-600', DECISION: 'bg-red-600' };
+const UNIFIED_NODE_COLOR = 'bg-blue-600';
+const NODE_COLORS: Record<string, string> = { UPLOAD: UNIFIED_NODE_COLOR, DEPT_HEAD_APPROVE: UNIFIED_NODE_COLOR, ROLE_APPROVE: UNIFIED_NODE_COLOR, DECISION: UNIFIED_NODE_COLOR };
 const LAYER_X_GAP = 160; const NODE_Y_GAP = 70; const BASE_X = 50; const BASE_Y = 30;
 
 /* ========== auto-layout (optional, called manually) ========== */
@@ -331,7 +332,7 @@ const WorkflowManager: React.FC = () => {
                 {unconnectedNodes.length > 0 && (
                   <Button size="sm" onClick={deleteAllOrphanNodes} className="bg-red-700 hover:bg-red-800"><Trash2 className="w-3 h-3 mr-1" />删除未连接({unconnectedNodes.length})</Button>
                 )}
-                <Button size="sm" onClick={runAutoLayout} className="bg-yellow-600 hover:bg-yellow-700"><GitBranch className="w-3 h-3 mr-1" />自动布局</Button>
+                <Button size="sm" onClick={runAutoLayout} className="bg-blue-600 hover:bg-blue-700"><GitBranch className="w-3 h-3 mr-1" />自动布局</Button>
                 <Button size="sm" onClick={handleSave} disabled={saving} className="bg-blue-600 hover:bg-blue-700"><Save className="w-3 h-3 mr-1" />{saving ? '保存中...' : '保存'}</Button>
               </div>
             )}
@@ -362,7 +363,7 @@ const WorkflowManager: React.FC = () => {
                       <div className="absolute -left-2 top-6 w-4 h-4 rounded-full bg-green-500 border-2 border-green-300 cursor-crosshair hover:scale-125 transition" style={{ zIndex: 30 }} title="点击接收连线"
                         onMouseDown={e => { e.preventDefault(); e.stopPropagation(); handleLeftSocket(e, n.id); }} />
                       <div onMouseDown={e => handleMouseDown(e, n.id)}
-                        className={`rounded-lg p-2 border-2 ml-1 ${NODE_COLORS[n.nodeType] || 'bg-gray-600'} ${editingNode?.id === n.id ? 'border-yellow-400' : 'border-transparent'} cursor-move`}>
+                        className={`rounded-lg p-2 border-2 ml-1 min-h-[56px] ${NODE_COLORS[n.nodeType] || UNIFIED_NODE_COLOR} ${editingNode?.id === n.id ? 'border-yellow-400' : 'border-transparent'} cursor-move`}>
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex gap-1 min-w-0"><GripVertical className="w-3 h-3 text-gray-400 flex-shrink-0" /><span className="text-[11px] font-bold text-white truncate">{n.nodeName}</span></div>
                           <button onMouseDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); deleteNode(n.id); }} className="text-red-300 hover:text-red-100 flex-shrink-0 ml-1"><X className="w-3 h-3" /></button>
@@ -415,7 +416,7 @@ const WorkflowManager: React.FC = () => {
                       )}
                       {editingNode.approverRule === 'ROLE_PM' && <Input value="项目经理" disabled className="bg-slate-700 border-slate-600 text-slate-400 text-sm mb-3" />}
                       {editingNode.approverRule === 'ROLE_PMC' && (
-                        <div className="mb-3 p-2 bg-blue-900/30 rounded text-[11px] text-blue-300">
+                        <div className="mb-3 p-2 bg-slate-700 border border-slate-600 rounded text-[11px] text-slate-200">
                           📋 PMC成员在流程运行时会自动拉取所有项目管理委员会成员，进行并行审批，无需单独设置。
                         </div>
                       )}

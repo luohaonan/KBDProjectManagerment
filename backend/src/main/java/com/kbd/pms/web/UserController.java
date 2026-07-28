@@ -95,6 +95,34 @@ public class UserController {
     }
 
     /**
+     * 删除用户（系统管理员）
+     */
+    @DeleteMapping("/{userId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
+    public ResponseEntity<Result<Void>> deleteUser(@PathVariable Long userId,
+                                                   Authentication authentication) {
+        User targetUser = userRepository.findById(userId)
+                .orElseThrow(() -> new ApiException(404, "用户不存在"));
+
+        // 不允许删除自己
+        User currentUser = userRepository.findByUsername(authentication.getName())
+                .orElseThrow(() -> new ApiException(401, "用户未登录"));
+        if (currentUser.getId().equals(userId)) {
+            throw new ApiException(400, "不能删除当前登录用户");
+        }
+
+        // 清除用户与角色的关联
+        targetUser.setRoles(new HashSet<>());
+        // 清除用户与部门的关联
+        targetUser.setDepartments(new HashSet<>());
+        userRepository.save(targetUser);
+
+        userRepository.delete(targetUser);
+        return ResponseEntity.ok(Result.ok(null));
+    }
+
+    /**
      * 修改用户密码（系统管理员可修改任何用户，普通用户只能修改自己的）
      */
     @PutMapping("/{userId}/password")
@@ -252,6 +280,34 @@ public class UserController {
                 .collect(Collectors.toList()));
 
         return ResponseEntity.ok(Result.ok(dto));
+    }
+
+    /**
+     * 删除角色（系统管理员）
+     */
+    @DeleteMapping("/roles/{roleId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
+    public ResponseEntity<Result<Void>> deleteRole(@PathVariable Long roleId) {
+        Role role = roleRepository.findById(roleId)
+                .orElseThrow(() -> new ApiException(404, "角色不存在"));
+
+        // 清除所有用户对这个角色的引用
+        List<User> usersWithRole = userRepository.findAll().stream()
+                .filter(u -> u.getRoles().stream().anyMatch(r -> r.getId().equals(roleId)))
+                .collect(Collectors.toList());
+        for (User user : usersWithRole) {
+            user.getRoles().removeIf(r -> r.getId().equals(roleId));
+            user.setUpdatedAt(Instant.now());
+            userRepository.save(user);
+        }
+
+        // 清除角色的权限关联
+        role.setPermissions(new HashSet<>());
+        roleRepository.save(role);
+
+        roleRepository.delete(role);
+        return ResponseEntity.ok(Result.ok(null));
     }
 
     /**

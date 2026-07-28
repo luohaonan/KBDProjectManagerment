@@ -57,6 +57,7 @@ interface ProjectData {
   } | null;
   currentMilestone: {
     milestoneCode: string; milestoneName: string; phaseLabel: string;
+    executorDeptNames?: string[];
   } | null;
   budgetExecution: {
     plannedTotalAmount: number | null; totalSpent: number | null;
@@ -82,7 +83,21 @@ const ProjectDetail: React.FC = () => {
   const [saving, setSaving] = useState(false);
 
   const canEditProjectInfo = hasRole('ROLE_PM') || hasRole('ROLE_ADMIN') || hasRole('ROLE_PROJECT_ADMIN');
-  const canUploadDeliverables = (user?.roles?.includes('ROLE_DEPT_EXECUTOR') || user?.roles?.includes('ROLE_ADMIN')) ?? false;
+  // 判断当前用户是否可以上传交付物
+  // ADMIN / 项目PM 可以上传所有里程碑交付物
+  // 部门负责人/执行人需要属于当前里程碑的执行部门
+  const canUploadDeliverables = (() => {
+    if (!user) return false;
+    const roles = user.roles || [];
+    // 只有 ADMIN、部门负责人 (ROLE_DEPT_HEAD) 和部门执行人 (ROLE_DEPT_EXECUTOR) 可以上传交付物
+    // PM 负责评审和项目管理，不负责上传核心交付物
+    if (roles.includes('ROLE_ADMIN')) return true;
+    if (!roles.includes('ROLE_DEPT_HEAD') && !roles.includes('ROLE_DEPT_EXECUTOR')) return false;
+    // 检查用户部门是否在里程碑执行部门列表中
+    const userDepts = user.departments || [];
+    const executorDepts = project?.currentMilestone?.executorDeptNames || [];
+    return userDepts.some(dept => executorDepts.includes(dept));
+  })();
 
   const [editForm, setEditForm] = useState({
     projectName: '', levelCode: '', indication: '', targetPathway: '', tppSummary: '',
@@ -207,12 +222,12 @@ const ProjectDetail: React.FC = () => {
       </CardHeader></Card>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-6 bg-slate-800 border border-slate-600">
-          <TabsTrigger value="overview" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-300"><FileText className="w-4 h-4 mr-2" />概览</TabsTrigger>
-          <TabsTrigger value="milestone" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-300"><CheckCircle className="w-4 h-4 mr-2" />里程碑控制台</TabsTrigger>
-          <TabsTrigger value="budget" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-300">预算追踪</TabsTrigger>
-          <TabsTrigger value="change-request" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-300"><AlertCircle className="w-4 h-4 mr-2" />变更申请</TabsTrigger>
-          <TabsTrigger value="documents" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white text-slate-300">交付物管理</TabsTrigger>
+        <TabsList className="mb-6 flex h-auto flex-wrap justify-start gap-2 rounded-lg border-0 bg-white p-2 shadow-sm">
+          <TabsTrigger value="overview" className="rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none data-[state=active]:bg-blue-100 data-[state=active]:text-slate-900 data-[state=active]:border-blue-300"><FileText className="w-4 h-4 mr-2" />概览</TabsTrigger>
+          <TabsTrigger value="milestone" className="rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none data-[state=active]:bg-blue-100 data-[state=active]:text-slate-900 data-[state=active]:border-blue-300"><CheckCircle className="w-4 h-4 mr-2" />里程碑控制台</TabsTrigger>
+          <TabsTrigger value="budget" className="rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none data-[state=active]:bg-blue-100 data-[state=active]:text-slate-900 data-[state=active]:border-blue-300">预算追踪</TabsTrigger>
+          <TabsTrigger value="change-request" className="rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none data-[state=active]:bg-blue-100 data-[state=active]:text-slate-900 data-[state=active]:border-blue-300"><AlertCircle className="w-4 h-4 mr-2" />变更申请</TabsTrigger>
+          <TabsTrigger value="documents" className="rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none data-[state=active]:bg-blue-100 data-[state=active]:text-slate-900 data-[state=active]:border-blue-300">交付物管理</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -252,7 +267,7 @@ const ProjectDetail: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="milestone">
-          <MilestoneConsole currentStage={project.currentMilestone?.milestoneCode ? parseInt(project.currentMilestone.milestoneCode.replace('G', '')) || 0 : 0} projectName={project.projectCode} projectId={project.id} currentUserId={user?.id} currentUserRoles={user?.roles} reviewStatus={project.reviewStatus} canUploadDeliverables={canUploadDeliverables} onReview={() => { api.get(`/api/projects/${projectId}`).then((res) => { const data = res.data as any; if (data.code === 200 || data.code === 0) setProject(data.data); }); }} />
+          <MilestoneConsole currentStage={project.currentMilestone?.milestoneCode ? parseInt(project.currentMilestone.milestoneCode.replace('G', '')) || 0 : 0} projectName={project.projectCode} projectId={project.id} currentUserId={user?.id} currentUserRoles={user?.roles} reviewStatus={project.reviewStatus} canUploadDeliverables={canUploadDeliverables} executorDeptName={(project.currentMilestone?.executorDeptNames && project.currentMilestone.executorDeptNames.length > 0) ? project.currentMilestone.executorDeptNames.join('、') : '对应部门'} onReview={() => { api.get(`/api/projects/${projectId}`).then((res) => { const data = res.data as any; if (data.code === 200 || data.code === 0) setProject(data.data); }); }} />
         </TabsContent>
 
         <TabsContent value="budget">
