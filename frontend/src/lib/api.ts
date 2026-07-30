@@ -22,10 +22,13 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error?.response?.status;
-    if (status === 401 || status === 403) {
+    if (status === 401) {
       localStorage.removeItem('token');
       toast.error('登录已失效，请重新登录');
       window.location.href = '/login';
+    } else if (status === 403) {
+      const message = error?.response?.data?.message || '当前操作无权限';
+      toast.error(message);
     }
     return Promise.reject(error);
   }

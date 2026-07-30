@@ -30,13 +30,31 @@ class BudgetServiceTest {
     private ProjectMilestoneRepository milestoneRepository;
     @Mock
     private MilestoneDefRepository milestoneDefRepository;
+    @Mock
+    private ProjectRepository projectRepository;
+    @Mock
+    private UserRepository userRepository;
+    @Mock
+    private ProjectTeamMemberRepository projectTeamMemberRepository;
+    @Mock
+    private ProjectChangeRequestRepository projectChangeRequestRepository;
+    @Mock
+    private ProjectChangeRequestService projectChangeRequestService;
+    @Mock
+    private NotificationService notificationService;
+    @Mock
+    private com.kbd.pms.workflow.WfProcessRepository wfProcessRepository;
+    @Mock
+    private com.kbd.pms.workflow.WfProcessService wfProcessService;
 
     private BudgetService budgetService;
 
     @BeforeEach
     void setUp() {
-        budgetService = new BudgetService(ledgerRepository, budgetLimitRepository, 
-            milestoneRepository, milestoneDefRepository);
+        budgetService = new BudgetService(ledgerRepository, budgetLimitRepository,
+            milestoneRepository, milestoneDefRepository, projectRepository, userRepository,
+            projectTeamMemberRepository, projectChangeRequestRepository, projectChangeRequestService,
+            notificationService, wfProcessRepository, wfProcessService);
     }
 
     @Test
@@ -62,12 +80,23 @@ class BudgetServiceTest {
         BudgetLimitEntity limit = createBudgetLimit(projectId, milestoneCode, BigDecimal.valueOf(1000));
         when(budgetLimitRepository.findByProjectIdAndMilestoneCode(projectId, milestoneCode)).thenReturn(Optional.of(limit));
 
+        ProjectEntity project = createProject(projectId, BigDecimal.valueOf(1000));
+        when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+
         // Mock current spent: 750 (75%) - yellow warning threshold
         ProjectBudgetLedgerEntity ledger = createLedger(projectId, BigDecimal.valueOf(750));
         when(ledgerRepository.findByProjectId(projectId)).thenReturn(List.of(ledger));
 
         // Execute
-        assertDoesNotThrow(() -> budgetService.processExpenditure(projectId, amount, Enums.ExpenseCategory.INTERNAL, "Test", 1L));
+        assertDoesNotThrow(() -> budgetService.processExpenditure(
+            projectId,
+            amount,
+            Enums.ExpenseCategory.INTERNAL,
+            null,
+            null,
+            null,
+            "Test",
+            1L));
 
         // Verify ledger saved
         verify(ledgerRepository).save(any());
@@ -78,7 +107,7 @@ class BudgetServiceTest {
         // Setup
         Long projectId = 1L;
         Long milestoneId = 2L;
-        BigDecimal amount = BigDecimal.valueOf(100);
+        BigDecimal amount = BigDecimal.valueOf(50);
         String milestoneCode = "G3";
 
         // Mock milestone definition
@@ -96,14 +125,61 @@ class BudgetServiceTest {
         BudgetLimitEntity limit = createBudgetLimit(projectId, milestoneCode, BigDecimal.valueOf(1000));
         when(budgetLimitRepository.findByProjectIdAndMilestoneCode(projectId, milestoneCode)).thenReturn(Optional.of(limit));
 
+        ProjectEntity project = createProject(projectId, BigDecimal.valueOf(1000));
+        when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+
         // Mock current spent: 950 (95%) - red warning threshold
         ProjectBudgetLedgerEntity ledger = createLedger(projectId, BigDecimal.valueOf(950));
         when(ledgerRepository.findByProjectId(projectId)).thenReturn(List.of(ledger));
 
         // Execute & Verify
+        assertDoesNotThrow(() -> budgetService.processExpenditure(
+                projectId,
+                amount,
+                Enums.ExpenseCategory.INTERNAL,
+                null,
+                null,
+                null,
+                "Test",
+                1L));
+
+        verify(ledgerRepository).save(any());
+    }
+
+    @Test
+    void testProcessExpenditure_ExceedsRemainingBudget() {
+        Long projectId = 1L;
+        Long milestoneId = 2L;
+        BigDecimal amount = BigDecimal.valueOf(101);
+        String milestoneCode = "G3";
+
+        MilestoneDefEntity def = new MilestoneDefEntity();
+        def.setMilestoneCode(milestoneCode);
+        when(milestoneDefRepository.findById(milestoneId)).thenReturn(Optional.of(def));
+
+        ProjectMilestoneEntity milestone = new ProjectMilestoneEntity();
+        milestone.setProjectId(projectId);
+        milestone.setMilestoneId(milestoneId);
+        when(milestoneRepository.findByProjectIdOrderByIdAsc(projectId)).thenReturn(List.of(milestone));
+
+        BudgetLimitEntity limit = createBudgetLimit(projectId, milestoneCode, BigDecimal.valueOf(1000));
+        when(budgetLimitRepository.findByProjectIdAndMilestoneCode(projectId, milestoneCode)).thenReturn(Optional.of(limit));
+
+        ProjectBudgetLedgerEntity ledger = createLedger(projectId, BigDecimal.valueOf(900));
+        when(ledgerRepository.findByProjectId(projectId)).thenReturn(List.of(ledger));
+
         BudgetExceededException exception = assertThrows(BudgetExceededException.class,
-            () -> budgetService.processExpenditure(projectId, amount, Enums.ExpenseCategory.INTERNAL, "Test", 1L));
-        assertTrue(exception.getMessage().contains("95%"));
+            () -> budgetService.processExpenditure(
+                projectId,
+                amount,
+                Enums.ExpenseCategory.INTERNAL,
+                null,
+                null,
+                null,
+                "Test",
+                1L));
+        assertTrue(exception.getMessage().contains("remaining budget"));
+        verify(ledgerRepository, never()).save(any());
     }
 
     @Test
@@ -138,7 +214,7 @@ class BudgetServiceTest {
         // Verify
         assertEquals(BigDecimal.valueOf(1000), response.approvedBudget());
         assertEquals(BigDecimal.valueOf(500), response.totalSpent());
-        assertEquals(BigDecimal.valueOf(0.5), response.utilizationRatio());
+        assertEquals(0, BigDecimal.valueOf(0.5).compareTo(response.utilizationRatio()));
         assertEquals(Enums.WarningLevel.NONE, response.warningLevel());
     }
 
@@ -160,6 +236,13 @@ class BudgetServiceTest {
         entity.setOccurredOn(java.time.LocalDate.now());
         entity.setExpenseCategory(Enums.ExpenseCategory.INTERNAL);
         entity.setCreatedAt(Instant.now());
+        return entity;
+    }
+
+    private ProjectEntity createProject(Long projectId, BigDecimal budgetTotal) {
+        ProjectEntity entity = new ProjectEntity();
+        entity.setProjectName("Test Project");
+        entity.setBudgetTotal(budgetTotal);
         return entity;
     }
 }

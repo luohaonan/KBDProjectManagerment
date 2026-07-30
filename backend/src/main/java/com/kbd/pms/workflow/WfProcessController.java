@@ -64,6 +64,7 @@ public class WfProcessController {
         System.out.println("========== [WfProcessController.update] START ==========");
         System.out.println("[CTRL] 请求 processId=" + id);
         System.out.println("[CTRL] 请求 description=" + request.description() + ", isActive=" + request.isActive());
+        System.out.println("[CTRL] 请求 budgetWarningThreshold=" + request.budgetWarningThreshold());
         if (request.nodes() != null) {
             System.out.println("[CTRL] 请求 nodes 数量=" + request.nodes().size());
             for (var nr : request.nodes()) {
@@ -83,6 +84,7 @@ public class WfProcessController {
 
         WfProcessDefinition updated = new WfProcessDefinition();
         updated.setDescription(request.description());
+        updated.setBudgetWarningThreshold(request.budgetWarningThreshold());
         updated.setIsActive(request.isActive() != null ? request.isActive() : true);
 
         if (request.nodes() != null) {
@@ -148,6 +150,7 @@ public class WfProcessController {
 
     public record WfProcessUpdateRequest(
             String description,
+            java.math.BigDecimal budgetWarningThreshold,
             Boolean isActive,
             List<NodeRequest> nodes,
             List<EdgeRequest> edges) {

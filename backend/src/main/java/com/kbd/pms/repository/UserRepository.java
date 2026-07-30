@@ -15,10 +15,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByUsername(String username);
 
     @EntityGraph(attributePaths = {"roles", "departments"})
+    Optional<User> findById(Long id);
+
+    @EntityGraph(attributePaths = {"roles", "departments"})
     List<User> findAll();
 
-    @Query("SELECT u FROM User u JOIN u.departments d WHERE d.id = :departmentId")
-    @EntityGraph(attributePaths = {"roles"})
+    @Query("SELECT DISTINCT u FROM User u LEFT JOIN FETCH u.roles r JOIN u.departments d WHERE d.id = :departmentId")
     List<User> findByDepartmentId(@Param("departmentId") Long departmentId);
 
     boolean existsByUsername(String username);
@@ -32,4 +34,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
         ORDER BY u.id ASC
         """)
     List<User> findActiveUsersByPermissionName(@Param("permissionName") String permissionName);
+
+    @EntityGraph(attributePaths = {"roles", "departments"})
+    @Query("""
+        SELECT DISTINCT u FROM User u
+        JOIN u.roles r
+        WHERE r.name = :roleName AND u.isActive = true
+        ORDER BY u.id ASC
+        """)
+    List<User> findActiveUsersByRoleName(@Param("roleName") String roleName);
 }

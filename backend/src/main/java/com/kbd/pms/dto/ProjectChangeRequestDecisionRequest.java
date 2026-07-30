@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotNull;
 public record ProjectChangeRequestDecisionRequest(
     @NotNull Long actorUserId,
     @NotNull Decision decision,
+    String stepCode,
     String opinion
 ) {
 

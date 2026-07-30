@@ -15,7 +15,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.UUID;
-import java.util.concurrent.Executors;
 
 @Service
 @SuppressWarnings("null")
@@ -24,10 +23,7 @@ public class FileStorageService {
   @Value("${app.file-storage.root:C:/KBD_PMS/uploads/}")
   private String storageRoot;
 
-  private final AuditLogService auditLogService;
-
-  public FileStorageService(AuditLogService auditLogService) {
-    this.auditLogService = auditLogService;
+  public FileStorageService() {
   }
 
   public String storeFile(MultipartFile file, String projectCode, Enums.MilestoneStage milestonePhase, Long uploaderId) throws IOException {
@@ -47,11 +43,6 @@ public class FileStorageService {
     // 存储文件
     Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
 
-    // 异步记录审计日志 (Java 21 Virtual Threads)
-    Executors.newVirtualThreadPerTaskExecutor().execute(() ->
-        auditLogService.logAction(uploaderId, "UPLOAD", null, "File uploaded: " + uniqueFilename)
-    );
-
     return filePath.toString();
   }
 
@@ -70,15 +61,6 @@ public class FileStorageService {
     Path path = Paths.get(filePath);
     Files.deleteIfExists(path);
 
-    // 异步记录审计日志
-    Executors.newVirtualThreadPerTaskExecutor().execute(() ->
-        auditLogService.logAction(userId, "DELETE", null, "File deleted: " + path.getFileName())
-    );
   }
 
-  public boolean hasPermission(Long userId, DocumentEntity document) {
-    // 实现权限检查逻辑：项目组成员可以访问
-    // 这里简化，假设有项目成员检查
-    return true;
-  }
 }

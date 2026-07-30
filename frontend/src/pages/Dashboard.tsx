@@ -18,8 +18,11 @@ interface Project {
   levelName: string;
   status: string;
   lifecyclePhaseLabel: string;
-  budgetExecutionSummary: {
+  budgetExecution: {
+    plannedTotalAmount: number | null;
+    totalSpent: number | null;
     utilizationRatio: number | null;
+    warningLevel?: string | null;
   };
 }
 
@@ -29,6 +32,18 @@ interface DashboardStats {
   pendingInitiationReviews: number;
   budgetAlerts: number;
   pendingProjectCompletions: number;
+}
+
+interface PendingTodoSummary {
+  total: number;
+  notificationTodos: number;
+  reviewTodos: number;
+  projectCompletionTodos: number;
+}
+
+interface AggregatedPendingTodo {
+  source: 'NOTIFICATION' | 'REVIEW';
+  todoType: 'PROJECT_COMPLETION' | 'DELIVERABLE' | 'MILESTONE' | 'INITIATION';
 }
 
 const stages = [
@@ -42,10 +57,17 @@ const stageColors = [
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { hasPermission, hasRole } = useAuth();
+  const { user, hasPermission, hasRole } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [pendingTodoSummary, setPendingTodoSummary] = useState<PendingTodoSummary>({
+    total: 0,
+    notificationTodos: 0,
+    reviewTodos: 0,
+    projectCompletionTodos: 0,
+  });
   const [filterLevel, setFilterLevel] = useState<string>('all');
+  const [filterBudget, setFilterBudget] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [deleteConfirm, setDeleteConfirm] = useState<Project | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -57,13 +79,34 @@ const Dashboard: React.FC = () => {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      const [projectsResponse, statsResponse] = await Promise.all([
+      const [projectsResponse, statsResponse, pendingTodosResponse] = await Promise.all([
         api.get('/api/projects'),
-        api.get('/api/stats/dashboard')
+        api.get('/api/stats/dashboard'),
+        api.get('/api/todos/pending')
       ]);
 
-      setProjects(projectsResponse.data.data || []);
+      const projectList = projectsResponse.data.data || [];
+      setProjects(projectList);
       setStats(statsResponse.data.data);
+
+      const allTodos: AggregatedPendingTodo[] = pendingTodosResponse.data?.data || [];
+      const notificationTodos = allTodos.filter((t) => t.source === 'NOTIFICATION');
+      const reviewTodos = allTodos.filter((t) => t.source === 'REVIEW');
+      // PROJECT_COMPLETION 类型的待办已包含在通知API返回中，不再通过 DRAFT 项目遍历重复计数
+      const projectCompletionTodos = notificationTodos.filter(
+        (t: AggregatedPendingTodo) => t.todoType === 'PROJECT_COMPLETION'
+      ).length;
+      // 通知待办中去掉 PROJECT_COMPLETION，避免和"项目完善"重复显示
+      const otherNotificationTodos = notificationTodos.filter(
+        (t: AggregatedPendingTodo) => t.todoType !== 'PROJECT_COMPLETION'
+      ).length;
+
+      setPendingTodoSummary({
+        total: notificationTodos.length + reviewTodos.length,
+        notificationTodos: otherNotificationTodos,
+        reviewTodos: reviewTodos.length,
+        projectCompletionTodos,
+      });
     } catch (error) {
       toast.error('加载仪表盘数据失败');
       console.error('Dashboard load error:', error);
@@ -81,30 +124,23 @@ const Dashboard: React.FC = () => {
     navigate('/create-project');
   };
 
-  const handleExportReport = async () => {
-    try {
-      const response = await api.get('/api/projects/export', {
-        responseType: 'blob'
-      });
-
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'projects.csv');
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      toast.success('报告导出成功');
-    } catch (error) {
-      toast.error('导出报告失败');
-    }
+  const handleExportReport = () => {
+    toast.info('导出报告功能开发中');
   };
 
   const handleViewTimeline = (projectId: number) => {
     navigate(`/projects/${projectId}/timeline`);
   };
 
-  const filteredProjects = filterLevel === 'all' ? projects : projects.filter(p => p.levelCode === filterLevel);
+  const filteredProjects = projects.filter(project => {
+    const levelMatch = filterLevel === 'all' || project.levelCode === filterLevel;
+    const ratio = project.budgetExecution?.utilizationRatio ?? 0;
+    const budgetMatch = filterBudget === 'all'
+      || (filterBudget === 'red' && ratio >= 95)
+      || (filterBudget === 'yellow' && ratio >= 80 && ratio < 95)
+      || (filterBudget === 'normal' && ratio < 80);
+    return levelMatch && budgetMatch;
+  });
 
   const handleProjectClick = (projectId: number) => {
     navigate(`/project/${projectId}`);
@@ -130,7 +166,10 @@ const Dashboard: React.FC = () => {
 
   const renderProjectCard = (project: Project) => {
     const currentStage = project.lifecyclePhaseLabel ? parseInt(project.lifecyclePhaseLabel.split('-')[0].substring(1), 10) || 0 : 0;
-    const utilizationRatio = project.budgetExecutionSummary?.utilizationRatio ?? 0;
+    const utilizationRatio = project.budgetExecution?.utilizationRatio ?? 0;
+    const totalBudget = project.budgetExecution?.plannedTotalAmount ?? 0;
+    const totalSpent = project.budgetExecution?.totalSpent ?? 0;
+    const remainingBudget = totalBudget - totalSpent;
 
     return (
       <div
@@ -189,8 +228,11 @@ const Dashboard: React.FC = () => {
           ))}
         </div>
 
-        <div className="text-sm text-slate-400">
-          预算执行率: {(utilizationRatio ?? 0).toFixed(1)}%
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm text-slate-300">
+          <div>总预算：¥{totalBudget.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <div>已执行：¥{totalSpent.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <div>执行率：{(utilizationRatio ?? 0).toFixed(1)}%</div>
+          <div>剩余：¥{remainingBudget.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
         </div>
       </div>
     );
@@ -266,9 +308,9 @@ const Dashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               {filteredProjects
-                .filter(project => project.budgetExecutionSummary && (project.budgetExecutionSummary.utilizationRatio ?? 0) > 80)
+                .filter(project => project.budgetExecution && (project.budgetExecution.utilizationRatio ?? 0) > 80)
                 .map(project => {
-                  const utilizationRatio = project.budgetExecutionSummary?.utilizationRatio ?? 0;
+                  const utilizationRatio = project.budgetExecution?.utilizationRatio ?? 0;
                   let alertIcon = null;
                   let alertColor = '';
                   if (utilizationRatio > 95) {
@@ -290,7 +332,7 @@ const Dashboard: React.FC = () => {
                     </div>
                   );
                 })}
-              {filteredProjects.filter(project => project.budgetExecutionSummary && (project.budgetExecutionSummary.utilizationRatio ?? 0) > 80).length === 0 && (
+              {filteredProjects.filter(project => project.budgetExecution && (project.budgetExecution.utilizationRatio ?? 0) > 80).length === 0 && (
                 <p className="text-slate-400">暂无预算预警</p>
               )}
             </CardContent>
@@ -309,20 +351,19 @@ const Dashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               {(() => {
-                const totalPending = (stats?.pendingMilestoneReviews || 0) + (stats?.pendingInitiationReviews || 0) + (stats?.pendingProjectCompletions || 0);
+                const totalPending = pendingTodoSummary.total;
                 if (totalPending > 0) {
                   return (
                     <div className="mb-3 p-3 bg-slate-700 rounded">
-                      <div className="flex items-center mb-1">
+                      <div className="flex items-center">
                         <Clock className="w-4 h-4 mr-2 text-blue-400" />
-                        <span className="text-sm font-semibold">待办任务</span>
-                      </div>
-                      <p className="text-xs text-slate-400">
+                        <p className="text-sm font-semibold text-slate-100">
                         共 {totalPending} 个待办
-                        {stats!.pendingMilestoneReviews > 0 && <span>（里程碑 {stats!.pendingMilestoneReviews}个）</span>}
-                        {stats!.pendingInitiationReviews > 0 && <span>（立项 {stats!.pendingInitiationReviews}个）</span>}
-                        {hasRole('ROLE_PM') && stats!.pendingProjectCompletions > 0 && <span>（项目完善 {stats!.pendingProjectCompletions}个）</span>}
-                      </p>
+                        {pendingTodoSummary.reviewTodos > 0 && <span>（评审 {pendingTodoSummary.reviewTodos}个）</span>}
+                        {pendingTodoSummary.notificationTodos > 0 && <span>（通知待办 {pendingTodoSummary.notificationTodos}个）</span>}
+                        {hasRole('ROLE_PM') && pendingTodoSummary.projectCompletionTodos > 0 && <span>（项目完善 {pendingTodoSummary.projectCompletionTodos}个）</span>}
+                        </p>
+                      </div>
                     </div>
                   );
                 }
@@ -353,6 +394,17 @@ const Dashboard: React.FC = () => {
                 <SelectItem value="G-T">G-T</SelectItem>
                 <SelectItem value="C-L">C-L</SelectItem>
                 <SelectItem value="C-Q">C-Q</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={filterBudget} onValueChange={setFilterBudget}>
+              <SelectTrigger className="w-44 bg-slate-800 border-slate-600 text-slate-200">
+                <SelectValue placeholder="预算预警筛选" />
+              </SelectTrigger>
+              <SelectContent className="bg-slate-800 border-slate-600">
+                <SelectItem value="all">全部预算状态</SelectItem>
+                <SelectItem value="red">红色预警</SelectItem>
+                <SelectItem value="yellow">黄色预警</SelectItem>
+                <SelectItem value="normal">正常</SelectItem>
               </SelectContent>
             </Select>
             {(hasRole('ROLE_ADMIN') || hasRole('ROLE_PROJECT_ADMIN')) && (

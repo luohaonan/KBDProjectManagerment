@@ -19,7 +19,7 @@ public class ProjectBudgetLedgerEntity {
   private LocalDate occurredOn;
 
   @Enumerated(EnumType.STRING)
-  @Column(name = "expense_category", nullable = false, length = 16)
+  @Column(name = "expense_category", nullable = false, length = 32)
   private Enums.ExpenseCategory expenseCategory;
 
   @Column(name = "amount", nullable = false, precision = 18, scale = 2)
@@ -62,4 +62,5 @@ public class ProjectBudgetLedgerEntity {
   public Instant getCreatedAt() { return createdAt; }
   public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 }
+
 

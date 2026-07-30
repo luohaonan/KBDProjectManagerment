@@ -4,7 +4,9 @@ import com.kbd.pms.entity.DocumentEntity;
 import com.kbd.pms.entity.Enums;
 import com.kbd.pms.service.DocumentService;
 import com.kbd.pms.service.FileStorageService;
+import com.kbd.pms.service.SecurityHelper;
 import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @RestController
@@ -22,10 +25,15 @@ public class DocumentController {
 
   private final DocumentService documentService;
   private final FileStorageService fileStorageService;
+  private final SecurityHelper securityHelper;
 
-  public DocumentController(DocumentService documentService, FileStorageService fileStorageService) {
+  public DocumentController(
+      DocumentService documentService,
+      FileStorageService fileStorageService,
+      SecurityHelper securityHelper) {
     this.documentService = documentService;
     this.fileStorageService = fileStorageService;
+    this.securityHelper = securityHelper;
   }
 
   @PostMapping("/upload")
@@ -67,28 +75,23 @@ public class DocumentController {
   }
 
   @GetMapping("/{id}/download")
-  public ResponseEntity<Resource> downloadDocument(@PathVariable Long id, @RequestParam Long userId) throws IOException {
+  public ResponseEntity<Resource> downloadDocument(@PathVariable Long id) throws IOException {
     DocumentEntity doc = documentService.getDocumentById(id);
-
-    if (!fileStorageService.hasPermission(userId, doc)) {
-      return ResponseEntity.status(403).build();
-    }
+    documentService.assertCanView(doc);
 
     Resource resource = fileStorageService.loadFileAsResource(doc.getStoragePath());
     MediaType mediaType = MediaType.APPLICATION_OCTET_STREAM;
     return ResponseEntity.ok()
         .contentType(mediaType)
-        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + doc.getFileName() + "\"")
+        .header(HttpHeaders.CONTENT_DISPOSITION,
+            ContentDisposition.attachment().filename(doc.getFileName(), StandardCharsets.UTF_8).build().toString())
         .body(resource);
   }
 
   @GetMapping("/{id}/preview")
-  public ResponseEntity<Resource> previewDocument(@PathVariable Long id, @RequestParam Long userId) throws IOException {
+  public ResponseEntity<Resource> previewDocument(@PathVariable Long id) throws IOException {
     DocumentEntity doc = documentService.getDocumentById(id);
-
-    if (!fileStorageService.hasPermission(userId, doc)) {
-      return ResponseEntity.status(403).build();
-    }
+    documentService.assertCanView(doc);
 
     Resource resource = fileStorageService.loadFileAsResource(doc.getStoragePath());
     String fileName = doc.getFileName().toLowerCase();
@@ -108,7 +111,8 @@ public class DocumentController {
     }
     return ResponseEntity.ok()
         .contentType(mediaType)
-        .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + doc.getFileName() + "\"")
+        .header(HttpHeaders.CONTENT_DISPOSITION,
+            ContentDisposition.inline().filename(doc.getFileName(), StandardCharsets.UTF_8).build().toString())
         .body(resource);
   }
 }

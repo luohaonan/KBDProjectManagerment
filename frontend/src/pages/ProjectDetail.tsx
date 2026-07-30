@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { MilestoneConsole } from '../components/MilestoneConsole';
 import { DocumentList } from '../components/DocumentList';
 import { BudgetTracker } from '../components/BudgetTracker';
+import { BudgetManagementPanel } from '../components/BudgetManagementPanel';
 import { ChangeRequestForm } from '../components/ChangeRequestForm';
 import { ChevronLeft, FileText, CheckCircle, AlertCircle, Loader2, X, Calendar, Download } from 'lucide-react';
 import api from '../lib/api';
@@ -81,6 +82,7 @@ const ProjectDetail: React.FC = () => {
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview');
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const canEditProjectInfo = hasRole('ROLE_PM') || hasRole('ROLE_ADMIN') || hasRole('ROLE_PROJECT_ADMIN');
   // 判断当前用户是否可以上传交付物
@@ -191,14 +193,14 @@ const ProjectDetail: React.FC = () => {
   };
 
   if (loading) return (<div className="min-h-screen bg-slate-900 text-white flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-blue-400" /><span className="text-slate-300 ml-3">加载中...</span></div>);
-  if (error || !project) return (<div className="min-h-screen bg-slate-900 text-white flex items-center justify-center"><div className="text-center"><p className="text-red-400 text-lg mb-4">{error || '项目不存在'}</p><Button onClick={() => navigate(-1)} variant="outline" className="bg-slate-800 text-slate-100 border-slate-600 hover:bg-slate-700"><ChevronLeft className="w-4 h-4 mr-2" />返回</Button></div></div>);
+  if (error || !project) return (<div className="min-h-screen bg-slate-900 text-white flex items-center justify-center"><div className="text-center"><p className="text-red-400 text-lg mb-4">{error || '项目不存在'}</p><Button onClick={() => navigate('/dashboard')} variant="outline" className="bg-slate-800 text-slate-100 border-slate-600 hover:bg-slate-700"><ChevronLeft className="w-4 h-4 mr-2" />返回首页</Button></div></div>);
 
   const statusLabel = statusConfig[project.projectStatus] || { label: project.projectStatus, color: 'bg-slate-600' };
 
   return (
     <div className="min-h-screen bg-slate-900 text-white"><div className="mx-auto w-full max-w-7xl px-6 py-6">
       <div className="mb-6 flex items-center gap-4">
-        <Button onClick={() => navigate(-1)} variant="outline" className="bg-slate-800 text-slate-100 border-slate-600 hover:bg-slate-700"><ChevronLeft className="w-4 h-4 mr-2" />返回</Button>
+        <Button onClick={() => navigate('/dashboard')} variant="outline" className="bg-slate-800 text-slate-100 border-slate-600 hover:bg-slate-700"><ChevronLeft className="w-4 h-4 mr-2" />返回首页</Button>
       </div>
       <Card className="bg-slate-800 border-slate-600 mb-6"><CardHeader>
         <div className="flex items-start justify-between">
@@ -225,7 +227,7 @@ const ProjectDetail: React.FC = () => {
         <TabsList className="mb-6 flex h-auto flex-wrap justify-start gap-2 rounded-lg border-0 bg-white p-2 shadow-sm">
           <TabsTrigger value="overview" className="rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none data-[state=active]:bg-blue-100 data-[state=active]:text-slate-900 data-[state=active]:border-blue-300"><FileText className="w-4 h-4 mr-2" />概览</TabsTrigger>
           <TabsTrigger value="milestone" className="rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none data-[state=active]:bg-blue-100 data-[state=active]:text-slate-900 data-[state=active]:border-blue-300"><CheckCircle className="w-4 h-4 mr-2" />里程碑控制台</TabsTrigger>
-          <TabsTrigger value="budget" className="rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none data-[state=active]:bg-blue-100 data-[state=active]:text-slate-900 data-[state=active]:border-blue-300">预算追踪</TabsTrigger>
+          <TabsTrigger value="budget" className="rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none data-[state=active]:bg-blue-100 data-[state=active]:text-slate-900 data-[state=active]:border-blue-300">预算管理</TabsTrigger>
           <TabsTrigger value="change-request" className="rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none data-[state=active]:bg-blue-100 data-[state=active]:text-slate-900 data-[state=active]:border-blue-300"><AlertCircle className="w-4 h-4 mr-2" />变更申请</TabsTrigger>
           <TabsTrigger value="documents" className="rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none data-[state=active]:bg-blue-100 data-[state=active]:text-slate-900 data-[state=active]:border-blue-300">交付物管理</TabsTrigger>
         </TabsList>
@@ -271,7 +273,18 @@ const ProjectDetail: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="budget">
-          <BudgetTracker data={{ internalCost: 0, externalCost: 0, totalBudget: project.budgetExecution?.plannedTotalAmount ?? 0 }} projectName={project.projectCode} projectId={parseInt(projectId || '0')} />
+          <div className="space-y-6">
+            <BudgetManagementPanel
+              projectId={parseInt(projectId || '0')}
+              projectName={project.projectCode}
+              onDataChanged={() => setRefreshKey(prev => prev + 1)}
+            />
+            <BudgetTracker
+              projectName={project.projectCode}
+              projectId={parseInt(projectId || '0')}
+              refreshKey={refreshKey}
+            />
+          </div>
         </TabsContent>
 
         <TabsContent value="change-request">
@@ -279,7 +292,7 @@ const ProjectDetail: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="documents" className="space-y-6">
-          <Card className="bg-slate-800 border-slate-600"><CardHeader><CardTitle className="text-slate-100">{project.lifecyclePhaseLabel || project.projectCode} 阶段交付物</CardTitle></CardHeader><CardContent><DocumentList projectId={project.projectCode} currentStage={0} /></CardContent></Card>
+          <DocumentList projectId={String(project.id)} currentStage={0} userRoles={user?.roles} userPermissions={user?.permissions} />
         </TabsContent>
       </Tabs>
     </div>
@@ -298,7 +311,7 @@ const ProjectDetail: React.FC = () => {
             <div><h3 className="text-slate-100 font-semibold mb-4 pb-2 border-b border-slate-600">科学依据</h3>
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="block text-sm font-medium text-slate-300 mb-2">靶点/通路 <span className="text-red-500">*</span></label><Input name="targetPathway" value={editForm.targetPathway} onChange={handleEditChange} className="bg-slate-700 border-slate-600 text-slate-100" /></div>
-                <div><label className="block text-sm font-medium text-slate-300 mb-2">拟定适应症 <span className="text-red-500">*</span></label><Input name="indication" value={editForm.indication} onChange={handleEditChange} className="bg-slate-700 border-slate-600 text-slate-100" /></div>
+                <div><label className="block text-sm font-medium text-slate-300 mb-2">拟定适应症</label><Input name="indication" value={editForm.indication} onChange={handleEditChange} className="bg-slate-700 border-slate-600 text-slate-100" /></div>
               </div>
               <div className="mt-4"><label className="block text-sm font-medium text-slate-300 mb-2">生物学机制 <span className="text-red-500">*</span></label><Textarea name="mechanism" value={editForm.mechanism} onChange={handleEditChange} rows={3} className="bg-slate-700 border-slate-600 text-slate-100" /></div>
               <div className="mt-4"><label className="block text-sm font-medium text-slate-300 mb-2">未满足的临床需求 <span className="text-red-500">*</span></label><Input name="unmetNeeds" value={editForm.unmetNeeds} onChange={handleEditChange} className="bg-slate-700 border-slate-600 text-slate-100" /></div>

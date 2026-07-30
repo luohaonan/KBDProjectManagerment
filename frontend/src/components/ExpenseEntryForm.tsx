@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { EXPENSE_CATEGORY_OPTIONS } from '../constants/expenseCategories';
 
 interface ExpenseEntryData {
   projectId: number;
@@ -90,13 +91,10 @@ export const ExpenseEntryForm: React.FC<ExpenseEntryFormProps> = ({
                   <SelectTrigger className="bg-slate-700 border-slate-600 text-slate-100">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-slate-700 border-slate-600">
-                    <SelectItem value="INTERNAL">内部研发费用</SelectItem>
-                    <SelectItem value="EXTERNAL">外部合作费用</SelectItem>
-                    <SelectItem value="EQUIPMENT">设备采购</SelectItem>
-                    <SelectItem value="TRAVEL">差旅费</SelectItem>
-                    <SelectItem value="CONSULTING">咨询费</SelectItem>
-                    <SelectItem value="OTHER">其他</SelectItem>
+                    <SelectContent className="bg-slate-700 border-slate-600">
+                      {EXPENSE_CATEGORY_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>

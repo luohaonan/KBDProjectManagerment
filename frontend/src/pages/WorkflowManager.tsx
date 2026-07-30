@@ -21,6 +21,7 @@ interface ProcessEdge {
 }
 interface ProcessDefinition {
   id: number; processType: string; milestoneCode: string; description: string;
+  budgetWarningThreshold?: number | null;
   isActive: boolean; nodes: ProcessNode[]; edges: ProcessEdge[];
 }
 
@@ -28,6 +29,52 @@ interface ProcessDefinition {
 const UNIFIED_NODE_COLOR = 'bg-blue-600';
 const NODE_COLORS: Record<string, string> = { UPLOAD: UNIFIED_NODE_COLOR, DEPT_HEAD_APPROVE: UNIFIED_NODE_COLOR, ROLE_APPROVE: UNIFIED_NODE_COLOR, DECISION: UNIFIED_NODE_COLOR };
 const LAYER_X_GAP = 160; const NODE_Y_GAP = 70; const BASE_X = 50; const BASE_Y = 30;
+
+function normalizeNodeForType(node: ProcessNode, nodeType: string): ProcessNode {
+  if (nodeType === 'DEPT_HEAD_APPROVE') {
+    return { ...node, nodeType, approverRule: 'DEPT_HEAD', approverValue: node.approverValue || '' };
+  }
+  if (nodeType === 'ROLE_APPROVE') {
+    const approverRule = ['ROLE_PM', 'ROLE_COMPLIANCE', 'SPECIFIC_USER'].includes(node.approverRule)
+      ? node.approverRule
+      : 'ROLE_PM';
+    const approverValue = approverRule === 'ROLE_PM'
+      ? 'PM'
+      : approverRule === 'ROLE_COMPLIANCE'
+        ? 'COMPLIANCE'
+        : node.approverValue || '';
+    return { ...node, nodeType, approverRule, approverValue };
+  }
+  if (nodeType === 'DECISION') {
+    const approverRule = ['ROLE_PMC', 'ROLE_PM', 'SPECIFIC_USER'].includes(node.approverRule)
+      ? node.approverRule
+      : 'ROLE_PMC';
+    const approverValue = approverRule === 'ROLE_PM'
+      ? 'PM'
+      : approverRule === 'ROLE_PMC'
+        ? 'PMC'
+        : node.approverValue || '';
+    return { ...node, nodeType, approverRule, approverValue };
+  }
+  return { ...node, nodeType };
+}
+
+function normalizeNodeForApproverRule(node: ProcessNode, approverRule: string): ProcessNode {
+  if (approverRule === 'DEPT_HEAD') {
+    return { ...node, nodeType: 'DEPT_HEAD_APPROVE', approverRule, approverValue: node.approverValue || '' };
+  }
+  if (approverRule === 'ROLE_COMPLIANCE') {
+    return { ...node, nodeType: 'ROLE_APPROVE', approverRule, approverValue: 'COMPLIANCE' };
+  }
+  if (approverRule === 'ROLE_PMC') {
+    return { ...node, nodeType: 'DECISION', approverRule, approverValue: 'PMC' };
+  }
+  if (approverRule === 'ROLE_PM') {
+    const nodeType = node.nodeType === 'DECISION' ? 'DECISION' : 'ROLE_APPROVE';
+    return { ...node, nodeType, approverRule, approverValue: 'PM' };
+  }
+  return { ...node, approverRule, approverValue: approverRule === 'SPECIFIC_USER' ? '' : node.approverValue };
+}
 
 /* ========== auto-layout (optional, called manually) ========== */
 function autoLayout(nodes: ProcessNode[], edges: ProcessEdge[]): ProcessNode[] {
@@ -62,6 +109,7 @@ const WorkflowManager: React.FC = () => {
   const [processType, setProcessType] = useState('MILESTONE');
   const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false);
   const [canvasKey, setCanvasKey] = useState('');
+  const [budgetWarningThreshold, setBudgetWarningThreshold] = useState('80');
 
   const [sourceNodeId, setSourceNodeId] = useState<number | null>(null);
 
@@ -111,9 +159,10 @@ const WorkflowManager: React.FC = () => {
   const selectProcess = (p: ProcessDefinition) => {
     console.log('========== [selectProcess] START ==========');
     console.log('[selectProcess] 流程 id=', p.id, ', nodes=', (p.nodes || []).length, ', edges=', (p.edges || []).length);
-    const normalized = (p.nodes || []).map(n => (!n.isUploader && n.approverRule === 'ROLE_COMPLIANCE') ? { ...n, approverRule: 'DEPT_HEAD', approverValue: '7' } : n);
-    console.log('[selectProcess] 归一化后 nodes=', normalized.length);
+    const normalized = (p.nodes || []).map(n => ({ ...n }));
+    console.log('[selectProcess] 保持原始 nodes 配置, count=', normalized.length);
     setCanvasKey(`cv-${p.id}-${Date.now()}`);
+    setBudgetWarningThreshold(String(p.budgetWarningThreshold ?? 80));
     setSelectedProcess(p); setNodes(normalized); setEdges(p.edges || []); setEditingNode(null); setSourceNodeId(null);
     console.log('========== [selectProcess] END ==========');
     normalized.filter(n => n.isUploader && n.approverValue).forEach(n => loadExecutorsForDept(n.approverValue));
@@ -132,8 +181,8 @@ const WorkflowManager: React.FC = () => {
     const id = -(Date.now() * 1000 + Math.floor(Math.random() * 1000));
     setNodes(prev => [...prev, {
       id, processDefinitionId: selectedProcess?.id || 0, nodeCode: `N_${Math.abs(id)}`,
-      nodeName: '新节点', nodeType: 'DECISION', approverRule: 'ROLE_PM',
-      approverValue: '', decisionType: getDecisionType(), isUploader: false,
+      nodeName: '新节点', nodeType: 'ROLE_APPROVE', approverRule: 'ROLE_PM',
+      approverValue: 'PM', decisionType: getDecisionType(), isUploader: false,
       deliverableSlotCode: '', positionX: maxX + LAYER_X_GAP, positionY: BASE_Y + 80, sortOrder: prev.length + 1
     }]);
   };
@@ -249,7 +298,9 @@ const WorkflowManager: React.FC = () => {
       }
 
       const payload = {
-        description: selectedProcess.description, isActive: selectedProcess.isActive,
+        description: selectedProcess.description,
+        budgetWarningThreshold: processType === 'BUDGET' ? Number(budgetWarningThreshold || 80) : selectedProcess.budgetWarningThreshold,
+        isActive: selectedProcess.isActive,
         nodes: cleanNodes.map(n => ({ nodeCode: n.nodeCode, nodeName: n.nodeName, nodeType: n.nodeType, approverRule: n.approverRule, approverValue: n.approverValue, decisionType: n.decisionType, isUploader: n.isUploader, deliverableSlotCode: n.deliverableSlotCode, positionX: n.positionX, positionY: n.positionY, sortOrder: n.sortOrder })),
         edges: cleanEdges.map(e => ({ fromNodeCode: e.fromNodeCode, toNodeCode: e.toNodeCode })),
       };
@@ -298,7 +349,7 @@ const WorkflowManager: React.FC = () => {
           </Button>
           <h1 className="text-2xl font-bold">流程管理</h1>
           <select value={processType} onChange={e => { setProcessType(e.target.value); setSelectedProcess(null); setNodes([]); setEdges([]); }} className="bg-slate-800 border border-slate-600 text-slate-200 rounded px-3 py-1.5 text-sm">
-            <option value="MILESTONE">里程碑审批</option><option value="CHANGE">项目变更</option><option value="TERMINATION">项目终止</option>
+            <option value="MILESTONE">里程碑审批</option><option value="CHANGE">项目变更</option><option value="BUDGET">预算变更</option><option value="TERMINATION">项目终止</option>
           </select>
         </div>
       </div>
@@ -340,6 +391,27 @@ const WorkflowManager: React.FC = () => {
           <CardContent>
             {!selectedProcess ? (<p className="text-slate-400 text-center py-20">请从左侧列表选择一个流程</p>) : (
               <div className="overflow-auto" style={{ maxHeight: '62vh' }}>
+                {processType === 'BUDGET' && (
+                  <div className="mb-4 rounded border border-amber-700 bg-amber-950/30 p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                      <div>
+                        <label className="block text-sm text-amber-200 mb-2">预算使用率预警阈值（%）</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={budgetWarningThreshold}
+                          onChange={e => setBudgetWarningThreshold(e.target.value)}
+                          className="bg-slate-800 border-amber-700 text-slate-100"
+                        />
+                      </div>
+                      <div className="text-xs text-amber-200/90">
+                        当项目预算执行率达到该阈值后，系统会向该项目的项目经理、项目管理员发送站内通知。
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {unconnectedNodes.length > 0 && (
                   <div className="mb-2 p-2 bg-red-900/50 border border-red-700 rounded text-xs flex items-center gap-2">
                     <AlertCircle className="w-3 h-3 text-red-400" />
@@ -403,9 +475,37 @@ const WorkflowManager: React.FC = () => {
                     </div>
                   ) : (
                     <>
+                      <label className="text-sm text-slate-400 mt-2 block">节点类型</label>
+                      <select
+                        value={editingNode.nodeType}
+                        onChange={e => setEditingNode(normalizeNodeForType(editingNode, e.target.value))}
+                        className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded px-3 py-2 text-sm mb-3"
+                      >
+                        <option value="DEPT_HEAD_APPROVE">部门负责人审批</option>
+                        <option value="ROLE_APPROVE">角色审批</option>
+                        <option value="DECISION">决策审批</option>
+                      </select>
                       <label className="text-sm text-slate-400 mt-2 block">审批人规则</label>
-                      <select value={editingNode.approverRule} onChange={e => setEditingNode({ ...editingNode, approverRule: e.target.value, approverValue: e.target.value === 'ROLE_PM' ? 'PM' : '' })} className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded px-3 py-2 text-sm mb-3">
-                        <option value="DEPT_HEAD">部门负责人</option><option value="ROLE_PM">项目经理(PM)</option><option value="ROLE_PMC">PMC成员</option><option value="SPECIFIC_USER">指定用户</option>
+                      <select
+                        value={editingNode.approverRule}
+                        onChange={e => setEditingNode(normalizeNodeForApproverRule(editingNode, e.target.value))}
+                        className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded px-3 py-2 text-sm mb-3"
+                      >
+                        {editingNode.nodeType === 'DEPT_HEAD_APPROVE' && <option value="DEPT_HEAD">部门负责人</option>}
+                        {editingNode.nodeType === 'ROLE_APPROVE' && (
+                          <>
+                            <option value="ROLE_PM">项目经理(PM)</option>
+                            <option value="ROLE_COMPLIANCE">药政合规部</option>
+                            <option value="SPECIFIC_USER">指定用户</option>
+                          </>
+                        )}
+                        {editingNode.nodeType === 'DECISION' && (
+                          <>
+                            <option value="ROLE_PMC">PMC成员</option>
+                            <option value="ROLE_PM">项目经理(PM)</option>
+                            <option value="SPECIFIC_USER">指定用户</option>
+                          </>
+                        )}
                       </select>
                       <label className="text-sm text-slate-400 block">审批角色</label>
                       {editingNode.approverRule === 'DEPT_HEAD' && (
@@ -414,7 +514,8 @@ const WorkflowManager: React.FC = () => {
                           {depts.map(d => <option key={d.id} value={String(d.id)}>{d.deptName} {d.headUserId ? '(✓负责人)' : '(未设)'}</option>)}
                         </select>
                       )}
-                      {editingNode.approverRule === 'ROLE_PM' && <Input value="项目经理" disabled className="bg-slate-700 border-slate-600 text-slate-400 text-sm mb-3" />}
+                      {editingNode.approverRule === 'ROLE_PM' && <Input value={editingNode.nodeType === 'DECISION' ? '项目经理（内部决策）' : '项目经理（技术初评）'} disabled className="bg-slate-700 border-slate-600 text-slate-400 text-sm mb-3" />}
+                      {editingNode.approverRule === 'ROLE_COMPLIANCE' && <Input value="药政合规部" disabled className="bg-slate-700 border-slate-600 text-slate-400 text-sm mb-3" />}
                       {editingNode.approverRule === 'ROLE_PMC' && (
                         <div className="mb-3 p-2 bg-slate-700 border border-slate-600 rounded text-[11px] text-slate-200">
                           📋 PMC成员在流程运行时会自动拉取所有项目管理委员会成员，进行并行审批，无需单独设置。

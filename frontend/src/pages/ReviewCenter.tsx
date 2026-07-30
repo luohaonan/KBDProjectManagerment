@@ -9,8 +9,10 @@ import api from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 interface PendingTodoItem {
+  source: 'NOTIFICATION' | 'REVIEW';
   /** 任务类型: PROJECT_COMPLETION(完善项目信息) / DELIVERABLE(上传交付物) / MILESTONE / INITIATION */
-  todoType: 'PROJECT_COMPLETION' | 'DELIVERABLE' | 'MILESTONE' | 'INITIATION';
+  todoType: 'PROJECT_COMPLETION' | 'DELIVERABLE' | 'MILESTONE' | 'INITIATION' | 'BUDGET';
+  sourceDetail?: string;
   notificationId?: number;
   taskId?: number;
   reviewApprovalId?: number;
@@ -23,6 +25,10 @@ interface PendingTodoItem {
   submittedAt?: string;
   approverRole?: string;
   reviewType?: string;
+  debugNotificationType?: string;
+  debugStepCode?: string;
+  debugCurrentActiveStep?: string;
+  debugApproverUserId?: number;
 }
 
 interface HistoryItem {
@@ -64,8 +70,27 @@ const resultBadgeMap: Record<string, { label: string; color: string }> = {
   REJECTED: { label: '未通过', color: 'bg-red-600' },
 };
 
+const milestonePhaseLabelMap: Record<string, string> = {
+  G0: 'G0-项目立项',
+  G1: 'G1-先导化合物确认',
+  G2: 'G2-优选化合物',
+  G3: 'G3-候选化合物提名(PCC)',
+  G4: 'G4-临床前开发完成(GLP)',
+  G5: 'G5-临床试验申请获批(IND)',
+  G6: 'G6-临床I期',
+  G7: 'G7-临床II期',
+  G8: 'G8-临床III期',
+  G9: 'G9-新药上市申请获批(NDA)',
+};
+
+const resolveMilestoneLabel = (milestoneCode?: string): string | null => {
+  if (!milestoneCode) return null;
+  return milestonePhaseLabelMap[milestoneCode] || `${milestoneCode}阶段`;
+};
+
 const reviewTabClass = 'rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none hover:bg-slate-100';
 const reviewTabActiveClass = 'data-[state=active]:bg-blue-100 data-[state=active]:text-slate-900 data-[state=active]:border-blue-300';
+const showTodoDebugInfo = import.meta.env.MODE !== 'production';
 
 const ReviewCenter: React.FC = () => {
   const navigate = useNavigate();
@@ -79,69 +104,38 @@ const ReviewCenter: React.FC = () => {
   const loadPendingTodos = async () => {
     setLoadingPending(true);
     try {
-      const notificationRes = await api.get('/api/notifications/pending-todos');
-      const notificationResult = notificationRes.data as { code: number; data: any[]; message?: string };
-
-      // 加载里程碑评审待办
-      const reviewRes = await api.get('/api/reviews/pending-tasks');
-      const reviewResult = reviewRes.data as { code: number; data: any[]; message?: string };
+      const todoRes = await api.get('/api/todos/pending');
+      const todoResult = todoRes.data as { code: number; data: any[]; message?: string };
       const todos: PendingTodoItem[] = [];
 
-      if (notificationResult.code === 200 || notificationResult.code === 0) {
-        for (const item of (notificationResult.data || [])) {
+      if (todoResult.code === 200 || todoResult.code === 0) {
+        for (const item of (todoResult.data || [])) {
           todos.push({
-            notificationId: item.id,
-            todoType: item.type === 'INITIATION' ? 'INITIATION' : 'DELIVERABLE',
+            source: item.source,
+            sourceDetail: item.sourceDetail,
+            notificationId: item.notificationId,
+            todoType: item.todoType,
+            taskId: item.taskId,
+            reviewApprovalId: item.reviewApprovalId,
             projectId: item.projectId,
-            projectName: extractProjectName(item.title, item.content),
-            projectCode: '',
-            milestoneName: item.milestoneCode ? `${item.milestoneCode}阶段` : undefined,
+            projectName: item.projectName || extractProjectName(item.title, item.content),
+            projectCode: item.projectCode || '',
+            milestoneName: item.milestoneName,
             milestoneCode: item.milestoneCode,
-            submittedAt: item.createdAt,
+            submitterName: item.submitterName,
+            submittedAt: item.submittedAt,
+            approverRole: item.approverRole,
+            reviewType: item.todoType === 'INITIATION' ? 'INITIATION' : item.source === 'REVIEW' ? 'MILESTONE' : undefined,
+            debugNotificationType: item.debugNotificationType,
+            debugStepCode: item.debugStepCode,
+            debugCurrentActiveStep: item.debugCurrentActiveStep,
+            debugApproverUserId: item.debugApproverUserId,
           });
         }
       }
 
-      if (reviewResult.code === 200 || reviewResult.code === 0) {
-        for (const task of (reviewResult.data || [])) {
-          todos.push({
-            todoType: task.reviewType === 'INITIATION' ? 'INITIATION' : 'MILESTONE',
-            taskId: task.taskId,
-            reviewApprovalId: task.reviewApprovalId,
-            projectId: task.projectId,
-            projectName: task.projectName,
-            projectCode: task.projectCode,
-            milestoneName: task.milestoneName,
-            milestoneCode: task.milestoneCode,
-            submitterName: task.submitterName,
-            submittedAt: task.submittedAt,
-            approverRole: task.approverRole,
-            reviewType: task.reviewType,
-          });
-        }
-      }
-
-      // 加载项目完善待办（DRAFT 状态项目 - 仅 PM 角色可见）
-      if (hasRole('ROLE_PM')) {
-        try {
-          const projRes = await api.get('/api/projects');
-          const projResult = projRes.data as { code: number; data: any[]; message?: string };
-          if (projResult.code === 200 || projResult.code === 0) {
-            for (const p of (projResult.data || [])) {
-              if (p.projectStatus === 'DRAFT' && p.pmUserId === user?.id) {
-                todos.push({
-                  todoType: 'PROJECT_COMPLETION',
-                  projectId: p.id,
-                  projectName: p.projectName,
-                  projectCode: p.projectCode,
-                  milestoneName: p.lifecyclePhaseLabel || 'G0-项目立项',
-                  milestoneCode: 'G0',
-                });
-              }
-            }
-          }
-        } catch {}
-      }
+      // 项目完善待办已通过通知系统（通知API返回的PROJECT_COMPLETION类型）处理，
+      // 不再遍历所有DRAFT项目重复生成，避免出现重复待办
 
       setPendingTodos(todos);
     } catch (error: any) {
@@ -205,6 +199,8 @@ const ReviewCenter: React.FC = () => {
       navigate(`/project/${todo.projectId}?tab=milestone`);
     } else if (todo.todoType === 'INITIATION') {
       navigate(`/project/${todo.projectId}?tab=overview&openInitiation=true`);
+    } else if (todo.todoType === 'BUDGET') {
+      navigate(`/project/${todo.projectId}?tab=budget`);
     } else {
       // 里程碑评审
       navigate(`/project/${todo.projectId}?tab=milestone&reviewTaskId=${todo.taskId}`);
@@ -228,6 +224,7 @@ const ReviewCenter: React.FC = () => {
   const getActionLabel = (todo: PendingTodoItem) => {
     if (todo.todoType === 'PROJECT_COMPLETION') return '完善项目信息';
     if (todo.todoType === 'DELIVERABLE') return '上传交付物';
+    if (todo.todoType === 'BUDGET') return '预算审批';
     return '去评审';
   };
 
@@ -241,6 +238,9 @@ const ReviewCenter: React.FC = () => {
     if (todo.todoType === 'INITIATION') {
       return <Badge className="bg-indigo-600 text-white text-xs">项目立项</Badge>;
     }
+    if (todo.todoType === 'BUDGET') {
+      return <Badge className="bg-emerald-600 text-white text-xs">预算审批</Badge>;
+    }
     return <Badge className="bg-yellow-600 text-white text-xs">里程碑评审</Badge>;
   };
 
@@ -249,6 +249,7 @@ const ReviewCenter: React.FC = () => {
   const deliverableCount = pendingTodos.filter(t => t.todoType === 'DELIVERABLE').length;
   const initiationCount = pendingTodos.filter(t => t.todoType === 'INITIATION').length;
   const milestoneCount = pendingTodos.filter(t => t.todoType === 'MILESTONE').length;
+  const budgetCount = pendingTodos.filter(t => t.todoType === 'BUDGET').length;
 
   return (
     <div className="min-h-screen bg-slate-900 text-white">
@@ -271,7 +272,7 @@ const ReviewCenter: React.FC = () => {
               查看和管理您的待办任务
               {pendingTodos.length > 0 && (
                 <span className="ml-2">
-                  （项目新建 {projectCompletionCount}个 / 交付物上传 {deliverableCount}个 / 项目立项 {initiationCount}个 / 里程碑评审 {milestoneCount}个）
+                  （项目新建 {projectCompletionCount}个 / 交付物上传 {deliverableCount}个 / 项目立项 {initiationCount}个 / 预算审批 {budgetCount}个 / 里程碑评审 {milestoneCount}个）
                 </span>
               )}
             </p>
@@ -334,12 +335,9 @@ const ReviewCenter: React.FC = () => {
                             <span className="text-slate-100 font-medium">
                               {todo.projectName}
                             </span>
-                            <Badge className="bg-blue-600 text-white text-xs">
-                              {todo.milestoneCode || '-'}
-                            </Badge>
-                            {todo.milestoneName && (
-                              <Badge className="bg-indigo-600 text-white text-xs">
-                                {todo.milestoneName}
+                            {resolveMilestoneLabel(todo.milestoneCode) && (
+                              <Badge className="bg-blue-600 text-white text-xs">
+                                {resolveMilestoneLabel(todo.milestoneCode)}
                               </Badge>
                             )}
                           </div>
@@ -365,11 +363,28 @@ const ReviewCenter: React.FC = () => {
                                 提交时间: {new Date(todo.submittedAt).toLocaleString('zh-CN')}
                               </span>
                             )}
-                            {todo.todoType === 'PROJECT_COMPLETION' && (
+                            {todo.todoType === 'PROJECT_COMPLETION' && !todo.submittedAt && (
                               <span>项目管理员已创建此项目，请尽快完善项目信息</span>
                             )}
                             {todo.todoType === 'DELIVERABLE' && (
                               <span>流程已流转到当前阶段，请尽快上传交付物</span>
+                            )}
+                            {showTodoDebugInfo && (
+                              <div className="mt-2 rounded border border-dashed border-slate-500 bg-slate-800/60 px-2 py-2 text-xs text-slate-300">
+                                <div className="font-medium text-slate-200 mb-1">调试信息</div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">
+                                  <span>source: {todo.source || '-'}</span>
+                                  <span>sourceDetail: {todo.sourceDetail || '-'}</span>
+                                  <span>todoType: {todo.todoType || '-'}</span>
+                                  <span>notificationId: {todo.notificationId ?? '-'}</span>
+                                  <span>taskId: {todo.taskId ?? '-'}</span>
+                                  <span>reviewApprovalId: {todo.reviewApprovalId ?? '-'}</span>
+                                  <span>debugNotificationType: {todo.debugNotificationType || '-'}</span>
+                                  <span>debugStepCode: {todo.debugStepCode || '-'}</span>
+                                  <span>debugCurrentActiveStep: {todo.debugCurrentActiveStep || '-'}</span>
+                                  <span>debugApproverUserId: {todo.debugApproverUserId ?? '-'}</span>
+                                </div>
+                              </div>
                             )}
                           </div>
                           <div className="flex items-center text-blue-400 text-sm">

@@ -69,8 +69,15 @@ interface ReviewRecord {
 interface StepProgress {
   stepCode: string;
   stepName: string;
+  nodeCode: string;
+  nodeType: string;
   status: string;
   completedAt: string | null;
+  approverRule?: string | null;
+  approverRuleLabel?: string | null;
+  expectedApproverLabel?: string | null;
+  active: boolean;
+  future: boolean;
   tasks: TaskDetail[];
 }
 
@@ -297,22 +304,24 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
 
   // 预览交付物
   const handlePreview = (docId: number) => {
-    api.get(`/api/documents/${docId}/preview`, {
-      params: { userId: currentUserId },
-      responseType: 'blob',
-    }).then(res => {
-      const rawContentType = res.headers['content-type'];
-      const contentType = typeof rawContentType === 'string'
-        ? rawContentType
-        : 'application/octet-stream';
-      const blob = new Blob([res.data], { type: contentType });
-      const previewUrl = window.URL.createObjectURL(blob);
-      window.open(previewUrl, '_blank', 'noopener,noreferrer');
-      setTimeout(() => window.URL.revokeObjectURL(previewUrl), 60_000);
-    }).catch(err => {
-      console.error('预览文件失败', err);
-      toast.error('预览文件失败');
-    });
+    const token = localStorage.getItem('token');
+    const url = `${api.defaults.baseURL}/api/milestone-deliverables/${docId}/preview`;
+    fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+      .then(async res => {
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const blob = await res.blob();
+        const previewUrl = window.URL.createObjectURL(blob);
+        window.open(previewUrl, '_blank', 'noopener,noreferrer');
+        setTimeout(() => window.URL.revokeObjectURL(previewUrl), 60_000);
+      })
+      .catch(err => {
+        console.error('预览文件失败', err);
+        toast.error('预览文件失败');
+      });
   };
 
   // 下载交付物
@@ -385,6 +394,7 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
         toast.success('评审申请已提交');
         loadReviews();
         loadRecords();
+        loadProgress();
         if (onReview) onReview();
       } else {
         toast.error(result.message || '提交评审失败');
@@ -419,6 +429,7 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
         setDecisionOpinion('');
         loadReviews();
         loadRecords();
+        loadProgress();
       } else {
         toast.error(result.message || '操作失败');
       }
@@ -456,7 +467,7 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-slate-100">
-                {projectName} - {milestoneCode}
+                {projectName}
               </CardTitle>
               <p className="text-sm text-slate-400 mt-2">
                 {stageDescription[currentStage]}
@@ -469,7 +480,7 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
                 </Badge>
               )}
               <Badge className="bg-blue-600 text-white px-3 py-1">
-                {milestoneCode}
+                {milestoneCode}-{stageDescription[currentStage]}
               </Badge>
             </div>
           </div>
@@ -652,16 +663,16 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
              </div>
            )}
            {isUnderReview && !myPendingTask && myCompletedTask && (
-             <div className="mb-4 p-3 bg-blue-900/30 border border-blue-700 rounded flex items-center gap-2">
+             <p className="mb-4 flex items-center gap-2 text-sm text-blue-400">
                <CheckCircle className="w-5 h-5 text-blue-400" />
-               <span className="text-blue-300">您已完成审批，等待后续评审</span>
-             </div>
+               <span>您已完成审批，等待后续评审</span>
+             </p>
            )}
            {isUnderReview && !myPendingTask && !myCompletedTask && (
-             <div className="mb-4 p-3 bg-blue-900/30 border border-blue-700 rounded flex items-center gap-2">
+             <p className="mb-4 flex items-center gap-2 text-sm text-blue-400">
                <AlertCircle className="w-5 h-5 text-blue-400" />
-               <span className="text-blue-300">评审已提交，等待审批</span>
-             </div>
+               <span>评审已提交，等待审批中，暂不可修改交付物</span>
+             </p>
            )}
            {isApproved && (
              <div className="mb-4 p-3 bg-green-900/30 border border-green-700 rounded flex items-center gap-2">
@@ -783,13 +794,16 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
                       <div className="flex items-center gap-2">
                         <span className="text-slate-100 font-medium">{step.stepName}</span>
                         <span className="text-slate-500 text-xs">({step.stepCode})</span>
+                        {step.active && <Badge className="bg-blue-700 text-white text-xs">当前节点</Badge>}
                       </div>
                       <Badge className={
                         step.status === 'APPROVED' ? 'bg-green-600 text-white text-xs' :
+                        step.status === 'REJECTED' ? 'bg-red-600 text-white text-xs' :
                         step.status === 'IN_PROGRESS' ? 'bg-blue-600 text-white text-xs' :
                         'bg-slate-500 text-white text-xs'
                       }>
                         {step.status === 'APPROVED' ? '已通过' :
+                         step.status === 'REJECTED' ? '未通过' :
                          step.status === 'IN_PROGRESS' ? '进行中' : '待处理'}
                       </Badge>
                     </div>
@@ -800,19 +814,26 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
                             <span>{task.approverName}</span>
                             {task.status === 'PENDING' && <Badge className="bg-yellow-600 text-white text-xs">待审批</Badge>}
                             {(task.status === 'APPROVED' || task.decision === 'GO') && <Badge className="bg-green-600 text-white text-xs">已通过</Badge>}
+                            {(task.status === 'REJECTED' || task.decision === 'NO_GO') && <Badge className="bg-red-600 text-white text-xs">未通过</Badge>}
                           </div>
                         ))}
                       </div>
                     )}
                     {(!step.tasks || step.tasks.length === 0) && (
-                      <p className="text-sm text-slate-400 mt-1">审批流程已按流程管理预配置，提交后将直接进入对应审批节点</p>
+                      <p className="text-sm text-slate-400 mt-1">
+                        {step.future
+                          ? `待激活：${step.expectedApproverLabel || step.approverRuleLabel || '对应审批节点'}`
+                          : step.active
+                            ? '当前节点等待系统生成具体审批任务'
+                            : '审批流程已按流程管理预配置，提交后将直接进入对应审批节点'}
+                      </p>
                     )}
                   </div>
                 ))}
               </div>
             ) : reviews.length === 0 ? (
                <p className="text-slate-400 text-sm">
-                 暂无评审流程。提交评审后，评审流程将显示在此。
+                 当前阶段暂未返回可展示的评审节点，请先检查流程管理中的流程图配置。
                </p>
             ) : (
               <div className="space-y-4">

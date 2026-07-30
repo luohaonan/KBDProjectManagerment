@@ -9,6 +9,8 @@ public interface ReviewApprovalRepository extends JpaRepository<ReviewApprovalEn
 
   List<ReviewApprovalEntity> findByProjectIdOrderByCreatedAtDesc(Long projectId);
 
+  List<ReviewApprovalEntity> findByProjectIdAndStatusIn(Long projectId, List<ReviewApprovalEntity.Status> statuses);
+
   Optional<ReviewApprovalEntity> findTopByProjectIdAndProjectMilestoneIdOrderByCreatedAtDesc(
       Long projectId, Long projectMilestoneId);
 

@@ -25,5 +25,19 @@ public interface ProjectTeamMemberRepository extends JpaRepository<ProjectTeamMe
       @Param("userId") Long userId,
       @Param("role") Enums.ProjectTeamRole role,
       @Param("onDate") LocalDate onDate);
+
+  @Query(
+      """
+      select (count(m) > 0) from ProjectTeamMemberEntity m
+      where m.projectId = :projectId
+        and m.userId = :userId
+        and m.effectiveFrom <= :onDate
+        and (m.effectiveTo is null or m.effectiveTo >= :onDate)
+      """)
+  boolean isActiveMember(
+      @Param("projectId") Long projectId,
+      @Param("userId") Long userId,
+      @Param("onDate") LocalDate onDate);
 }
+
 

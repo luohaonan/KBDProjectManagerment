@@ -129,6 +129,28 @@ const CreateProject: React.FC = () => {
           projectName: proj.projectName || '',
           levelCode: proj.levelCode || 'H-L',
           description: proj.description || '',
+          targetPath: proj.targetPathway || '',
+          mechanism: proj.mechanism || '',
+          indication: proj.indication || '',
+          unmetNeeds: proj.unmetNeeds || '',
+          scientificBasis: proj.scientificBasis || '',
+          expectedIndication: proj.expectedIndication || '',
+          administrationRoute: proj.administrationRoute || '',
+          dosageForm: proj.dosageForm || '',
+          dosageFrequency: proj.dosageFrequency || '',
+          efficacyTarget: proj.efficacyTarget || '',
+          safetyAdvantage: proj.safetyAdvantage || '',
+          differentiation: proj.differentiation || '',
+          budgetTotal: proj.budgetTotal || 0,
+          plannedPccDate: proj.plannedPccDate || '',
+          plannedIndDate: proj.plannedIndDate || '',
+          plannedNdaDate: proj.plannedNdaDate || '',
+          plannedEndDate: proj.plannedEndDate || '',
+          budgetToPcc: proj.budgetToPcc || 0,
+          riskScientific: proj.riskScientific || '',
+          riskCompetitive: proj.riskCompetitive || '',
+          riskRegulatory: proj.riskRegulatory || '',
+          suggestionAndSupport: proj.suggestionAndSupport || '',
           pmUserId: proj.pmUserId || null,
         }));
       } else {
@@ -188,11 +210,6 @@ const CreateProject: React.FC = () => {
 
     // 完善模式：通过 API 更新项目
     if (isCompleteMode && projectIdFromUrl) {
-      if (!formData.indication.trim()) {
-        toast.error('请填写拟定适应症');
-        return;
-      }
-
       setLoading(true);
       try {
         const budgetTotalInYuan = formData.budgetTotal || 0;
@@ -454,7 +471,7 @@ const CreateProject: React.FC = () => {
                     <div><label className="mb-2 block text-sm font-medium text-slate-700">靶点/通路</label><Input name="targetPath" value={formData.targetPath} onChange={handleChange} placeholder="描述靶点名称、生物学机制" /></div>
                     <div><label className="mb-2 block text-sm font-medium text-slate-700">生物学机制</label><Textarea name="mechanism" value={formData.mechanism} onChange={handleChange} placeholder="详细说明靶点的生物学机制" rows={3} /></div>
                     <div className="grid grid-cols-2 gap-4">
-                      <div><label className="mb-2 block text-sm font-medium text-slate-700">拟定适应症 <span className="text-red-500">*</span></label><Input name="indication" value={formData.indication} onChange={handleChange} placeholder="例：肺癌、糖尿病等" required /></div>
+                      <div><label className="mb-2 block text-sm font-medium text-slate-700">拟定适应症</label><Input name="indication" value={formData.indication} onChange={handleChange} placeholder="例：肺癌、糖尿病等" /></div>
                       <div><label className="mb-2 block text-sm font-medium text-slate-700">未满足的临床需求</label><Input name="unmetNeeds" value={formData.unmetNeeds} onChange={handleChange} placeholder="现有治疗方案的局限性" /></div>
                     </div>
                     <div><label className="mb-2 block text-sm font-medium text-slate-700">科学依据</label><Textarea name="scientificBasis" value={formData.scientificBasis} onChange={handleChange} placeholder="支持靶点与疾病关联性的关键文献/数据" rows={3} /></div>

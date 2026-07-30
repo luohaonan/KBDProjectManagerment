@@ -1,0 +1,96 @@
+SET @wf_budget_warning_threshold_exists := (
+  SELECT COUNT(1)
+  FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'wf_process_definition'
+    AND column_name = 'budget_warning_threshold'
+);
+
+SET @alter_wf_budget_warning_threshold_sql := IF(
+  @wf_budget_warning_threshold_exists = 0,
+  'ALTER TABLE wf_process_definition ADD COLUMN budget_warning_threshold DECIMAL(5,2) NULL COMMENT ''预算预警阈值(%)''',
+  'SELECT 1'
+);
+
+PREPARE stmt FROM @alter_wf_budget_warning_threshold_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @project_change_adjustment_amount_exists := (
+  SELECT COUNT(1)
+  FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'project_change_request'
+    AND column_name = 'adjustment_amount'
+);
+
+SET @alter_project_change_adjustment_amount_sql := IF(
+  @project_change_adjustment_amount_exists = 0,
+  'ALTER TABLE project_change_request ADD COLUMN adjustment_amount DECIMAL(18,2) NULL COMMENT ''本次预算调整增减金额''',
+  'SELECT 1'
+);
+
+PREPARE stmt FROM @alter_project_change_adjustment_amount_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @notification_milestone_code_len := (
+  SELECT CHARACTER_MAXIMUM_LENGTH
+  FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'notification'
+    AND column_name = 'milestone_code'
+  LIMIT 1
+);
+
+SET @alter_notification_milestone_code_sql := IF(
+  @notification_milestone_code_len IS NOT NULL AND @notification_milestone_code_len < 64,
+  'ALTER TABLE notification MODIFY COLUMN milestone_code VARCHAR(64) NULL COMMENT ''关联里程碑代码/流程节点编码''',
+  'SELECT 1'
+);
+
+PREPARE stmt FROM @alter_notification_milestone_code_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+UPDATE wf_process_definition
+SET budget_warning_threshold = COALESCE(budget_warning_threshold, 80.00)
+WHERE process_type = 'BUDGET';
+
+UPDATE project_change_request
+SET adjustment_amount = requested_budget_amount - COALESCE(previous_budget_amount, 0)
+WHERE change_type = 'BUDGET'
+  AND requested_budget_amount IS NOT NULL
+  AND adjustment_amount IS NULL;
+
+SET @project_budget_ledger_expense_category_type := (
+  SELECT COLUMN_TYPE
+  FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'project_budget_ledger'
+    AND column_name = 'expense_category'
+  LIMIT 1
+);
+
+SET @project_budget_ledger_expense_category_len := (
+  SELECT CHARACTER_MAXIMUM_LENGTH
+  FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'project_budget_ledger'
+    AND column_name = 'expense_category'
+  LIMIT 1
+);
+
+SET @alter_project_budget_ledger_expense_category_sql := IF(
+  @project_budget_ledger_expense_category_type IS NOT NULL
+  AND (
+    LOWER(@project_budget_ledger_expense_category_type) LIKE 'enum(%'
+    OR COALESCE(@project_budget_ledger_expense_category_len, 0) < 32
+  ),
+  'ALTER TABLE project_budget_ledger MODIFY COLUMN expense_category VARCHAR(32) NOT NULL COMMENT ''支出分类''',
+  'SELECT 1'
+);
+
+PREPARE stmt FROM @alter_project_budget_ledger_expense_category_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

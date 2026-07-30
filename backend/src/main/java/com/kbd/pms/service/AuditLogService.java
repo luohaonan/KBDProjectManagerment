@@ -17,6 +17,9 @@ public class AuditLogService {
   }
 
   public void logAction(Long userId, String action, Long documentId, String details) {
+    if (documentId == null) {
+      return;
+    }
     AuditLogEntity log = new AuditLogEntity();
     log.setUserId(userId);
     log.setAction(action);

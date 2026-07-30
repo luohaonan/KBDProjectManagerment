@@ -38,4 +38,9 @@ public interface NotificationRepository extends JpaRepository<NotificationEntity
   @Modifying
   @Query("UPDATE NotificationEntity n SET n.isDone = true WHERE n.projectId = :projectId AND n.milestoneCode = :milestoneCode AND n.type = :type AND n.isTodo = true AND n.isDone = false")
   int markTodoDoneByProjectAndMilestoneAndType(Long projectId, String milestoneCode, String type);
+
+  /** 删除项目关联的所有通知和待办 */
+  @Modifying
+  @Query("DELETE FROM NotificationEntity n WHERE n.projectId = :projectId")
+  int deleteByProjectId(Long projectId);
 }

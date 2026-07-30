@@ -24,6 +24,9 @@ public class WfProcessDefinition {
     @Column(name = "description", length = 255)
     private String description;
 
+    @Column(name = "budget_warning_threshold", precision = 5, scale = 2)
+    private java.math.BigDecimal budgetWarningThreshold;
+
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = Boolean.TRUE;
 
@@ -51,6 +54,8 @@ public class WfProcessDefinition {
     public void setMilestoneCode(String milestoneCode) { this.milestoneCode = milestoneCode; }
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
+    public java.math.BigDecimal getBudgetWarningThreshold() { return budgetWarningThreshold; }
+    public void setBudgetWarningThreshold(java.math.BigDecimal budgetWarningThreshold) { this.budgetWarningThreshold = budgetWarningThreshold; }
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
     public List<WfProcessNode> getNodes() { return nodes; }

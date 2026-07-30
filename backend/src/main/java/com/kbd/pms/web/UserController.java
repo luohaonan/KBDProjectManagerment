@@ -5,6 +5,8 @@ import com.kbd.pms.entity.OrgDepartmentEntity;
 import com.kbd.pms.entity.Permission;
 import com.kbd.pms.entity.Role;
 import com.kbd.pms.entity.User;
+import com.kbd.pms.entity.IamUserEntity;
+import com.kbd.pms.repository.IamUserRepository;
 import com.kbd.pms.repository.OrgDepartmentRepository;
 import com.kbd.pms.repository.PermissionRepository;
 import com.kbd.pms.repository.RoleRepository;
@@ -30,15 +32,18 @@ public class UserController {
     private final RoleRepository roleRepository;
     private final PermissionRepository permissionRepository;
     private final OrgDepartmentRepository orgDepartmentRepository;
+    private final IamUserRepository iamUserRepository;
     private final PasswordEncoder passwordEncoder;
 
     public UserController(UserRepository userRepository, RoleRepository roleRepository,
                          PermissionRepository permissionRepository, OrgDepartmentRepository orgDepartmentRepository,
+                         IamUserRepository iamUserRepository,
                          PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.permissionRepository = permissionRepository;
         this.orgDepartmentRepository = orgDepartmentRepository;
+        this.iamUserRepository = iamUserRepository;
         this.passwordEncoder = passwordEncoder;
     }
 
@@ -91,6 +96,54 @@ public class UserController {
         }
 
         user = userRepository.save(user);
+        return ResponseEntity.ok(Result.ok(UserDto.fromEntity(user)));
+    }
+
+    /**
+     * 修改用户基础信息（系统管理员）
+     */
+    @PutMapping("/{userId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
+    public ResponseEntity<Result<UserDto>> updateUser(@PathVariable Long userId,
+                                                      @RequestBody UpdateUserRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ApiException(404, "用户不存在"));
+
+        String normalizedUsername = request.getUsername() != null ? request.getUsername().trim() : "";
+        if (normalizedUsername.isEmpty()) {
+            throw new ApiException(400, "用户名不能为空");
+        }
+
+        userRepository.findByUsername(normalizedUsername)
+                .filter(existing -> !existing.getId().equals(userId))
+                .ifPresent(existing -> {
+                    throw new ApiException(400, "用户名已存在");
+                });
+
+        String normalizedEmail = request.getEmail() != null ? request.getEmail().trim() : null;
+        if (normalizedEmail != null && normalizedEmail.isEmpty()) {
+            normalizedEmail = null;
+        }
+
+        user.setUsername(normalizedUsername);
+        user.setEmail(normalizedEmail);
+
+        Set<OrgDepartmentEntity> departments = new HashSet<>();
+        if (request.getDepartmentIds() != null) {
+            for (Long deptId : request.getDepartmentIds()) {
+                OrgDepartmentEntity dept = orgDepartmentRepository.findById(deptId)
+                        .orElseThrow(() -> new ApiException(400, "部门不存在: " + deptId));
+                departments.add(dept);
+            }
+        }
+        user.setDepartments(departments);
+
+        user.setUpdatedAt(Instant.now());
+        user = userRepository.save(user);
+
+        syncIamUserProfile(user);
+
         return ResponseEntity.ok(Result.ok(UserDto.fromEntity(user)));
     }
 
@@ -366,6 +419,19 @@ public class UserController {
         public void setNewPassword(String newPassword) { this.newPassword = newPassword; }
     }
 
+    public static class UpdateUserRequest {
+        private String username;
+        private String email;
+        private List<Long> departmentIds;
+
+        public String getUsername() { return username; }
+        public void setUsername(String username) { this.username = username; }
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+        public List<Long> getDepartmentIds() { return departmentIds; }
+        public void setDepartmentIds(List<Long> departmentIds) { this.departmentIds = departmentIds; }
+    }
+
     public static class UpdateRolesRequest {
         private List<String> roles;
 
@@ -445,5 +511,30 @@ public class UserController {
         public void setUsername(String username) { this.username = username; }
         public String getEmail() { return email; }
         public void setEmail(String email) { this.email = email; }
+    }
+
+    private void syncIamUserProfile(User user) {
+        if (user == null || user.getId() == null) {
+            return;
+        }
+
+        IamUserEntity iamUser = iamUserRepository.findById(user.getId()).orElse(null);
+        if (iamUser == null) {
+            iamUser = new IamUserEntity();
+            iamUser.setId(user.getId());
+        }
+        iamUser.setUserNo(user.getUsername());
+        iamUser.setDisplayName(user.getUsername());
+        iamUser.setEmail(user.getEmail());
+        iamUser.setIsActive(Boolean.TRUE.equals(user.getIsActive()));
+        if (user.getDepartments() != null && !user.getDepartments().isEmpty()) {
+            OrgDepartmentEntity primaryDept = user.getDepartments().iterator().next();
+            iamUser.setDeptId(primaryDept != null ? primaryDept.getId() : null);
+        }
+        iamUser.setUpdatedAt(Instant.now());
+        if (iamUser.getCreatedAt() == null) {
+            iamUser.setCreatedAt(Instant.now());
+        }
+        iamUserRepository.save(iamUser);
     }
 }

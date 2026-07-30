@@ -7,5 +7,7 @@ import java.util.List;
 public interface ProjectBudgetLedgerRepository extends JpaRepository<ProjectBudgetLedgerEntity, Long> {
     List<ProjectBudgetLedgerEntity> findByProjectId(Long projectId);
 
+    List<ProjectBudgetLedgerEntity> findByProjectIdOrderByOccurredOnDescIdDesc(Long projectId);
+
     void deleteByProjectId(Long projectId);
 }

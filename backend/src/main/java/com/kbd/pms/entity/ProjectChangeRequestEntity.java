@@ -94,6 +94,9 @@ public class ProjectChangeRequestEntity {
   @Column(name = "requested_budget_amount", precision = 18, scale = 2)
   private BigDecimal requestedBudgetAmount;
 
+  @Column(name = "adjustment_amount", precision = 18, scale = 2)
+  private BigDecimal adjustmentAmount;
+
   @Column(name = "new_pm_user_id")
   private Long newPmUserId;
 
@@ -160,6 +163,8 @@ public class ProjectChangeRequestEntity {
   public void setPreviousBudgetAmount(BigDecimal previousBudgetAmount) { this.previousBudgetAmount = previousBudgetAmount; }
   public BigDecimal getRequestedBudgetAmount() { return requestedBudgetAmount; }
   public void setRequestedBudgetAmount(BigDecimal requestedBudgetAmount) { this.requestedBudgetAmount = requestedBudgetAmount; }
+  public BigDecimal getAdjustmentAmount() { return adjustmentAmount; }
+  public void setAdjustmentAmount(BigDecimal adjustmentAmount) { this.adjustmentAmount = adjustmentAmount; }
   public Long getNewPmUserId() { return newPmUserId; }
   public void setNewPmUserId(Long newPmUserId) { this.newPmUserId = newPmUserId; }
   public Boolean getAssetDisposalConfirmed() { return assetDisposalConfirmed; }
@@ -171,4 +176,5 @@ public class ProjectChangeRequestEntity {
   public Instant getUpdatedAt() { return updatedAt; }
   public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 }
+
 

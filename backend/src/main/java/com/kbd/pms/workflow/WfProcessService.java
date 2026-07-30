@@ -125,6 +125,7 @@ public class WfProcessService {
         }
 
         existing.setDescription(updated.getDescription());
+        existing.setBudgetWarningThreshold(updated.getBudgetWarningThreshold());
         existing.setIsActive(updated.getIsActive());
         existing.setUpdatedAt(Instant.now());
 
@@ -249,6 +250,24 @@ public class WfProcessService {
         return result;
     }
 
+    public List<WfProcessNode> getDisplayNodesInStableOrder(WfProcessDefinition def) {
+        if (def == null || def.getNodes() == null) {
+            return Collections.emptyList();
+        }
+        return def.getNodes().stream()
+                .sorted(Comparator
+                        .comparing(WfProcessNode::getSortOrder, Comparator.nullsLast(Integer::compareTo))
+                        .thenComparing(WfProcessNode::getId, Comparator.nullsLast(Long::compareTo)))
+                .toList();
+    }
+
+    public List<WorkflowStepDescriptor> getMilestoneStepDescriptors(String milestoneCode, ProjectEntity project) {
+        WfProcessDefinition def = getActiveMilestoneProcess(milestoneCode);
+        return getDisplayNodesInStableOrder(def).stream()
+                .map(node -> toStepDescriptor(node, project))
+                .toList();
+    }
+
     public List<ReviewApprovalTaskEntity> createMilestoneApprovalTasks(
             WfProcessDefinition def, Long approvalId, ProjectEntity project) {
 
@@ -257,7 +276,7 @@ public class WfProcessService {
 
         int sortOrder = 0;
         for (WfProcessNode node : approvalNodes) {
-            List<Long> approverIds = resolveApprovers(node, project);
+            List<Long> approverIds = ensureIamUsersExist(resolveApprovers(node, project));
             String stepCode = deriveStepCode(node);
             for (Long approverId : approverIds) {
                 ReviewApprovalTaskEntity task = new ReviewApprovalTaskEntity();
@@ -265,6 +284,7 @@ public class WfProcessService {
                 task.setApproverUserId(approverId);
                 task.setApproverRole(node.getApproverRule() != null ? node.getApproverRule() : "ROLE_PMC");
                 task.setStepCode(stepCode);
+                task.setDeliverableSlotCode(node.getDeliverableSlotCode());
                 task.setSortOrder(sortOrder++);
                 task.setStatus(ReviewApprovalTaskEntity.Status.PENDING);
                 task.setCreatedAt(Instant.now());
@@ -275,12 +295,69 @@ public class WfProcessService {
         return tasks;
     }
 
+    private List<Long> ensureIamUsersExist(List<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<Long> ensuredIds = new ArrayList<>();
+        for (Long userId : userIds) {
+            if (userId == null) {
+                continue;
+            }
+            ensureIamUserExists(userId);
+            if (iamUserRepository.findById(userId).isPresent()) {
+                ensuredIds.add(userId);
+            }
+        }
+        return ensuredIds;
+    }
+
+    private void ensureIamUserExists(Long userId) {
+        if (userId == null || iamUserRepository.findById(userId).isPresent()) {
+            return;
+        }
+
+        userRepository.findById(userId).ifPresent(user -> {
+            IamUserEntity iamUser = new IamUserEntity();
+            iamUser.setId(user.getId());
+            iamUser.setUserNo(user.getUsername());
+            iamUser.setDisplayName(user.getUsername());
+            String normalizedEmail = user.getEmail();
+            if (normalizedEmail != null && normalizedEmail.trim().isEmpty()) {
+                normalizedEmail = null;
+            }
+            iamUser.setEmail(normalizedEmail);
+            iamUser.setIsActive(Boolean.TRUE.equals(user.getIsActive()));
+            iamUser.setCreatedAt(Instant.now());
+            iamUser.setUpdatedAt(Instant.now());
+
+            OrgDepartmentEntity department = user.getDepartment();
+            if (department != null) {
+                iamUser.setDeptId(department.getId());
+            }
+
+            iamUserRepository.save(iamUser);
+        });
+    }
+
     private String deriveStepCode(WfProcessNode node) {
+        return normalizeNodeToStepCode(node);
+    }
+
+    public String normalizeNodeToStepCode(WfProcessNode node) {
         if (node.getNodeType() == null) return "UNKNOWN";
         return switch (node.getNodeType()) {
+            case "UPLOAD" -> "UPLOAD";
             case "DEPT_HEAD_APPROVE" -> "DEPT_HEAD_APPROVE";
             case "ROLE_APPROVE" -> {
                 if ("ROLE_PM".equals(node.getApproverRule())) yield "PM_TECH_REVIEW";
+                if ("ROLE_COMPLIANCE".equals(node.getApproverRule())) yield "COMPLIANCE_OPINION";
+                if ("DEPT_HEAD".equals(node.getApproverRule())
+                        && node.getApproverValue() != null
+                        && node.getApproverValue().trim().equals("7")) {
+                    yield "COMPLIANCE_OPINION";
+                }
                 yield "ROLE_APPROVE";
             }
             case "DECISION" -> {
@@ -289,6 +366,104 @@ public class WfProcessService {
                 yield "DECISION";
             }
             default -> node.getNodeType();
+        };
+    }
+
+    public WorkflowStepDescriptor toStepDescriptor(WfProcessNode node, ProjectEntity project) {
+        String approverRule = node.getApproverRule();
+        return new WorkflowStepDescriptor(
+                node.getNodeCode(),
+                node.getNodeName(),
+                node.getNodeType(),
+                normalizeNodeToStepCode(node),
+                node.getSortOrder(),
+                approverRule,
+                resolveApproverRuleLabel(node),
+                node.getApproverValue(),
+                node.getIsUploader(),
+                node.getDecisionType(),
+                buildExpectedApproverLabel(node, project));
+    }
+
+    public String resolveApproverRuleLabel(WfProcessNode node) {
+        if (node == null) {
+            return null;
+        }
+        if (Boolean.TRUE.equals(node.getIsUploader()) || "UPLOAD".equals(node.getNodeType())) {
+            return "上传部门执行人";
+        }
+        if (node.getApproverRule() == null) {
+            return null;
+        }
+        return switch (node.getApproverRule()) {
+            case "ROLE_PM" -> "项目经理";
+            case "ROLE_PMC" -> "PMC成员";
+            case "ROLE_COMPLIANCE" -> "药政合规部负责人";
+            case "DEPT_HEAD" -> "部门负责人";
+            case "SPECIFIC_USER" -> "指定人员";
+            default -> node.getApproverRule();
+        };
+    }
+
+    public String buildExpectedApproverLabel(WfProcessNode node, ProjectEntity project) {
+        if (node == null) {
+            return null;
+        }
+        if (Boolean.TRUE.equals(node.getIsUploader()) || "UPLOAD".equals(node.getNodeType())) {
+            if (node.getApproverValue() != null && !node.getApproverValue().isBlank()) {
+                List<String> deptNames = Arrays.stream(node.getApproverValue().split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .map(s -> {
+                            try {
+                                return orgDepartmentRepository.findById(Long.parseLong(s))
+                                        .map(OrgDepartmentEntity::getDeptName)
+                                        .orElse(null);
+                            } catch (NumberFormatException e) {
+                                return null;
+                            }
+                        })
+                        .filter(Objects::nonNull)
+                        .toList();
+                if (!deptNames.isEmpty()) {
+                    return String.join("、", deptNames) + "执行人";
+                }
+            }
+            return "上传部门执行人";
+        }
+
+        if (node.getApproverRule() == null) {
+            return null;
+        }
+
+        return switch (node.getApproverRule()) {
+            case "ROLE_PM" -> project != null && project.getPmUserId() != null ? "项目经理" : "项目经理";
+            case "ROLE_PMC" -> "PMC成员";
+            case "ROLE_COMPLIANCE" -> "药政合规部负责人";
+            case "DEPT_HEAD" -> {
+                if (node.getApproverValue() != null && !node.getApproverValue().isBlank()) {
+                    List<String> deptNames = Arrays.stream(node.getApproverValue().split(","))
+                            .map(String::trim)
+                            .filter(s -> !s.isEmpty())
+                            .map(s -> {
+                                try {
+                                    return orgDepartmentRepository.findById(Long.parseLong(s))
+                                            .map(OrgDepartmentEntity::getDeptName)
+                                            .orElse(null);
+                                } catch (NumberFormatException e) {
+                                    return null;
+                                }
+                            })
+                            .filter(Objects::nonNull)
+                            .toList();
+                    if (!deptNames.isEmpty()) {
+                        yield String.join("、", deptNames) + "负责人";
+                    }
+                }
+                yield "部门负责人";
+            }
+            case "SPECIFIC_USER" -> "指定人员";
+            default -> node.getApproverRule();
         };
     }
 
@@ -305,6 +480,12 @@ public class WfProcessService {
                     List<Long> pmcIds = governanceCommitteeMemberRepository
                             .findActiveMemberIds(project.getPmcCommitteeId(), LocalDate.now(ZoneOffset.UTC));
                     ids.addAll(pmcIds);
+                }
+                if (ids.isEmpty()) {
+                    ids.addAll(userRepository.findActiveUsersByRoleName("ROLE_PMC").stream()
+                            .map(User::getId)
+                            .filter(Objects::nonNull)
+                            .toList());
                 }
                 break;
             case "DEPT_HEAD":
@@ -349,11 +530,12 @@ public class WfProcessService {
                         e.getToNode().getId(), e.getToNode().getNodeCode()))
                 .collect(Collectors.toList());
         return new WfProcessDefinitionResponse(def.getId(), def.getProcessType(), def.getMilestoneCode(),
-                def.getDescription(), def.getIsActive(), nodeDtos, edgeDtos);
+                def.getDescription(), def.getBudgetWarningThreshold(), def.getIsActive(), nodeDtos, edgeDtos);
     }
 
     public record WfProcessDefinitionResponse(
             Long id, String processType, String milestoneCode, String description,
+            java.math.BigDecimal budgetWarningThreshold,
             Boolean isActive, List<WfProcessNodeResponse> nodes, List<WfProcessEdgeResponse> edges) {}
     public record WfProcessNodeResponse(
             Long id, Long processDefinitionId, String nodeCode, String nodeName,

@@ -25,6 +25,13 @@ public class GlobalExceptionHandler {
     if (code < 100 || code > 599) {
       code = 400;
     }
+    log.warn("ApiException: code={}, message={}", code, ex.getMessage());
+    StackTraceElement[] trace = ex.getStackTrace();
+    int limit = Math.min(trace.length, 5);
+    for (int i = 0; i < limit; i++) {
+      log.warn("  at {}.{}({}:{})", trace[i].getClassName(), trace[i].getMethodName(),
+          trace[i].getFileName(), trace[i].getLineNumber());
+    }
     return ResponseEntity.status(code).body(Result.fail(code, ex.getMessage()));
   }
 

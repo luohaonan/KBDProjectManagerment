@@ -19,6 +19,8 @@ public interface DocumentRepository extends JpaRepository<DocumentEntity, Long> 
 
   List<DocumentEntity> findByProjectId(Long projectId);
 
+  List<DocumentEntity> findByProjectIdOrderByMilestonePhaseAscDeliverableSlotCodeAscUploadedAtAsc(Long projectId);
+
   @Modifying
   @Query("UPDATE DocumentEntity d SET d.isLocked = true WHERE d.projectId = :projectId AND d.milestonePhase = :milestonePhase")
   void lockDocumentsByProjectAndPhase(@Param("projectId") Long projectId, @Param("milestonePhase") Enums.MilestoneStage milestonePhase);

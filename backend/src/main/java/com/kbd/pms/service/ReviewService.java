@@ -43,6 +43,7 @@ import com.kbd.pms.repository.UserRepository;
 import com.kbd.pms.workflow.WfProcessDefinition;
 import com.kbd.pms.workflow.WfProcessNode;
 import com.kbd.pms.workflow.WfProcessService;
+import com.kbd.pms.workflow.WorkflowStepDescriptor;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -51,15 +52,20 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 @SuppressWarnings("null")
 public class ReviewService {
+
+  private static final Logger log = LoggerFactory.getLogger(ReviewService.class);
 
   // 步骤代码常量
   private static final String STEP_UPLOAD = "UPLOAD";
@@ -84,6 +90,7 @@ public class ReviewService {
   private final ReviewApprovalTaskRepository reviewApprovalTaskRepository;
   private final ReviewRecordRepository reviewRecordRepository;
   private final IamUserRepository iamUserRepository;
+  private final UserRepository userRepository;
   private final OrgDepartmentRepository orgDepartmentRepository;
   private final DocumentRepository documentRepository;
   private final GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository;
@@ -103,6 +110,7 @@ public class ReviewService {
       ReviewApprovalTaskRepository reviewApprovalTaskRepository,
       ReviewRecordRepository reviewRecordRepository,
       IamUserRepository iamUserRepository,
+      UserRepository userRepository,
       OrgDepartmentRepository orgDepartmentRepository,
       DocumentRepository documentRepository,
       GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository,
@@ -120,6 +128,7 @@ public class ReviewService {
     this.reviewApprovalTaskRepository = reviewApprovalTaskRepository;
     this.reviewRecordRepository = reviewRecordRepository;
     this.iamUserRepository = iamUserRepository;
+    this.userRepository = userRepository;
     this.orgDepartmentRepository = orgDepartmentRepository;
     this.documentRepository = documentRepository;
     this.governanceCommitteeMemberRepository = governanceCommitteeMemberRepository;
@@ -268,6 +277,7 @@ public class ReviewService {
 
     // 创建多步审批任务链
     createMultiStepTasks(project, pm, def, approval);
+    syncPendingReviewTodos(project, pm, def, approval);
 
     writeMilestoneHistory(project.getId(), pm.getId(),
         MilestoneHistoryEntity.Action.SUBMIT_REVIEW,
@@ -299,20 +309,24 @@ public class ReviewService {
     MilestoneDefEntity def = milestoneDefRepository.findById(pm.getMilestoneId())
         .orElseThrow(() -> new ApiException(500, "里程碑字典缺失"));
 
+    Long currentUserId = securityHelper.getCurrentUserId();
     String stepCode = request.stepCode();
     String decision = request.decision();
+    String normalizedRequestedStepCode = normalizeRequestedStepCode(stepCode, currentUserId);
+    log.info("approveStep start: projectId={}, currentUserId={}, requestActorUserId={}, rawStepCode={}, normalizedRequestedStepCode={}, decision={}",
+        projectId, currentUserId, request.actorUserId(), stepCode, normalizedRequestedStepCode, decision);
 
     // 根据步骤类型查找可处理的审批任务
     List<ReviewApprovalTaskEntity> stepTasks;
     ReviewApprovalEntity approval;
 
-    if (STEP_PMC_DECISION.equals(stepCode) || STEP_PM_INTERNAL_REVIEW.equals(stepCode)) {
+    if (STEP_PMC_DECISION.equals(normalizedRequestedStepCode) || STEP_PM_INTERNAL_REVIEW.equals(normalizedRequestedStepCode)) {
       // PMC决策/PM内部评审: 所有该步骤的pending任务
       approval = reviewApprovalRepository
           .findTopByProjectIdAndProjectMilestoneIdOrderByCreatedAtDesc(projectId, pm.getId())
           .orElseThrow(() -> new ApiException(404, "未找到评审记录"));
       stepTasks = reviewApprovalTaskRepository
-          .findByReviewApprovalIdAndStepCodeAndStatus(approval.getId(), stepCode,
+          .findByReviewApprovalIdAndStepCodeAndStatus(approval.getId(), normalizedRequestedStepCode,
               ReviewApprovalTaskEntity.Status.PENDING);
     } else {
       // 部门负责人/PM/合规: 按审批人匹配
@@ -320,9 +334,18 @@ public class ReviewService {
           .findTopByProjectIdAndProjectMilestoneIdOrderByCreatedAtDesc(projectId, pm.getId())
           .orElseThrow(() -> new ApiException(404, "未找到评审记录"));
       stepTasks = reviewApprovalTaskRepository
+          .findByReviewApprovalIdAndStepCodeAndStatus(approval.getId(), normalizedRequestedStepCode,
+              ReviewApprovalTaskEntity.Status.PENDING);
+    }
+
+    if (stepTasks.isEmpty() && !Objects.equals(normalizedRequestedStepCode, stepCode)) {
+      stepTasks = reviewApprovalTaskRepository
           .findByReviewApprovalIdAndStepCodeAndStatus(approval.getId(), stepCode,
               ReviewApprovalTaskEntity.Status.PENDING);
     }
+
+    log.info("approveStep lookup: projectId={}, approvalId={}, rawStepCode={}, normalizedRequestedStepCode={}, matchedTaskCount={}",
+        projectId, approval.getId(), stepCode, normalizedRequestedStepCode, stepTasks.size());
 
     if (stepTasks.isEmpty()) {
       throw new ApiException(409, "当前步骤没有待审批的任务: " + stepCode);
@@ -330,31 +353,45 @@ public class ReviewService {
 
     // 查找当前用户的任务
     ReviewApprovalTaskEntity myTask = stepTasks.stream()
-        .filter(t -> t.getApproverUserId() != null && t.getApproverUserId().equals(request.actorUserId()))
+        .filter(t -> t.getApproverUserId() != null && t.getApproverUserId().equals(currentUserId))
         .findFirst()
         .orElse(null);
 
     if (myTask == null) {
+      log.warn("approveStep no matching approver: projectId={}, approvalId={}, currentUserId={}, rawStepCode={}, normalizedRequestedStepCode={}, pendingTasks={}",
+          projectId, approval.getId(), currentUserId, stepCode, normalizedRequestedStepCode,
+          stepTasks.stream().map(t -> String.format("{id=%d,step=%s,role=%s,approver=%s}",
+              t.getId(), t.getStepCode(), t.getApproverRole(), String.valueOf(t.getApproverUserId())))
+              .collect(Collectors.joining(",")));
       throw new ApiException(403, "您不在当前步骤的审批人列表中");
     }
 
+    String effectiveStepCode = normalizeStepCode(normalizedRequestedStepCode, myTask.getApproverRole(), currentUserId);
+    log.info("approveStep resolved: projectId={}, approvalId={}, taskId={}, taskStepCode={}, taskApproverRole={}, effectiveStepCode={}",
+        projectId, approval.getId(), myTask.getId(), myTask.getStepCode(), myTask.getApproverRole(), effectiveStepCode);
+
     LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
 
-    switch (stepCode) {
+    switch (effectiveStepCode) {
       case STEP_DEPT_HEAD_APPROVE -> {
-        return handleDeptHeadApprove(project, pm, def, approval, myTask, request, now);
+        return handleDeptHeadApprove(project, pm, def, approval,
+            myTask, rewriteActor(request, currentUserId), now);
       }
       case STEP_PM_TECH_REVIEW -> {
-        return handlePmTechReview(project, pm, def, approval, myTask, request, now);
+        return handlePmTechReview(project, pm, def, approval,
+            myTask, rewriteActor(request, currentUserId), now);
       }
       case STEP_COMPLIANCE_OPINION -> {
-        return handleComplianceOpinion(project, pm, def, approval, myTask, request, now);
+        return handleComplianceOpinion(project, pm, def, approval,
+            myTask, rewriteActor(request, currentUserId), now);
       }
       case STEP_PMC_DECISION -> {
-        return handlePmcDecision(project, pm, def, approval, myTask, stepTasks, request, now);
+        return handlePmcDecision(project, pm, def, approval,
+            myTask, stepTasks, rewriteActor(request, currentUserId), now);
       }
       case STEP_PM_INTERNAL_REVIEW -> {
-        return handlePmInternalReview(project, pm, def, approval, myTask, request, now);
+        return handlePmInternalReview(project, pm, def, approval,
+            myTask, rewriteActor(request, currentUserId), now);
       }
       default -> throw new ApiException(400, "未知的审批步骤代码: " + stepCode);
     }
@@ -393,6 +430,8 @@ public class ReviewService {
       }
     }
 
+    syncPendingReviewTodos(project, pm, def, approval);
+
     return toApprovalDto(approval);
   }
 
@@ -420,6 +459,8 @@ public class ReviewService {
     }
     // 通过后自然流转到下一步骤(COMPLIANCE_OPINION或PMC_DECISION)
 
+    syncPendingReviewTodos(project, pm, def, approval);
+
     return toApprovalDto(approval);
   }
 
@@ -445,6 +486,8 @@ public class ReviewService {
     if ("REJECTED".equals(request.decision())) {
       resetToUploadStep(approval, pm, project, "合规性审核不通过: " + request.opinion());
     }
+
+    syncPendingReviewTodos(project, pm, def, approval);
 
     return toApprovalDto(approval);
   }
@@ -480,6 +523,7 @@ public class ReviewService {
     boolean allDecided = allPmcTasks.stream()
         .allMatch(t -> t.getStatus() != ReviewApprovalTaskEntity.Status.PENDING);
     if (!allDecided) {
+      syncPendingReviewTodos(project, pm, def, approval);
       return toApprovalDto(approval); // 还有人未决策，等待
     }
 
@@ -565,6 +609,9 @@ public class ReviewService {
         request.actorUserId(), "SUBMITTED", pm.getStatus().name(),
         "评审通过 (Go): " + (request.opinion() != null ? request.opinion() : ""));
 
+    notificationService.completeTodoByProjectAndMilestone(
+        project.getId(), def.getMilestoneCode(), "REVIEW_APPROVAL");
+
     return toApprovalDto(approval);
   }
 
@@ -593,6 +640,9 @@ public class ReviewService {
         MilestoneHistoryEntity.Action.DECISION,
         request.actorUserId(), "SUBMITTED", pm.getStatus().name(),
         "有条件通过 (Conditional Go): " + (request.opinion() != null ? request.opinion() : ""));
+
+    notificationService.completeTodoByProjectAndMilestone(
+        project.getId(), def.getMilestoneCode(), "REVIEW_APPROVAL");
 
     return toApprovalDto(approval);
   }
@@ -624,6 +674,9 @@ public class ReviewService {
         request.actorUserId(), "SUBMITTED", pm.getStatus().name(),
         "评审不通过 (No Go): " + (request.opinion() != null ? request.opinion() : ""));
 
+    notificationService.completeTodoByProjectAndMilestone(
+        project.getId(), def.getMilestoneCode(), "REVIEW_APPROVAL");
+
     return toApprovalDto(approval);
   }
 
@@ -654,6 +707,13 @@ public class ReviewService {
     project.setReviewStatus(null);
     project.setUpdatedAt(Instant.now());
     projectRepository.save(project);
+
+    MilestoneDefEntity def = milestoneDefRepository.findById(pm.getMilestoneId())
+        .orElse(null);
+    if (def != null) {
+      notificationService.completeTodoByProjectAndMilestone(
+          project.getId(), def.getMilestoneCode(), "REVIEW_APPROVAL");
+    }
   }
 
   // ==================== 创建多步审批任务链 ====================
@@ -664,6 +724,15 @@ public class ReviewService {
       var processDef = wfProcessService.getActiveMilestoneProcess(def.getMilestoneCode());
       List<ReviewApprovalTaskEntity> tasks =
           wfProcessService.createMilestoneApprovalTasks(processDef, approval.getId(), project);
+      log.info("createMultiStepTasks generated: projectId={}, projectCode={}, milestoneCode={}, milestoneName={}, approvalId={}, processDefId={}, taskCount={}",
+          project.getId(), project.getProjectCode(), def.getMilestoneCode(), def.getMilestoneName(),
+          approval.getId(), processDef.getId(), tasks.size());
+      for (int i = 0; i < tasks.size(); i++) {
+        ReviewApprovalTaskEntity task = tasks.get(i);
+        log.info("createMultiStepTasks task[{}]: approvalId={}, sortOrder={}, stepCode={}, approverRole={}, approverUserId={}, deliverableSlotCode={}, status={}",
+            i, approval.getId(), task.getSortOrder(), task.getStepCode(), task.getApproverRole(),
+            task.getApproverUserId(), task.getDeliverableSlotCode(), task.getStatus());
+      }
       reviewApprovalTaskRepository.saveAll(tasks);
     } catch (Exception e) {
       // fallback: if workflow engine fails, log and continue
@@ -705,33 +774,15 @@ public class ReviewService {
         .findTopByProjectIdAndProjectMilestoneIdOrderByCreatedAtDesc(projectId, pm.getId())
         .orElse(null);
 
+    String currentActiveStep = approval != null ? resolveCurrentActiveStep(approval.getId()) : null;
+
     String milestoneCode = def.getMilestoneCode();
+    List<WorkflowStepDescriptor> descriptors = wfProcessService
+        .getMilestoneStepDescriptors(milestoneCode, project);
 
-    // 构建步骤列表
-    List<ReviewProgressResponse.StepProgress> steps = new ArrayList<>();
-
-    // 判断是否跳过合规步骤
-    boolean skipCompliance = SKIP_COMPLIANCE_MILESTONES.contains(milestoneCode);
-    boolean isPmInternal = PM_INTERNAL_REVIEW_MILESTONES.contains(milestoneCode);
-
-    // Step 1: UPLOAD
-    steps.add(buildStepProgress(approval, milestoneCode, STEP_UPLOAD, "交付物上传"));
-
-    // Step 2: DEPT_HEAD_APPROVE
-    steps.add(buildStepProgress(approval, milestoneCode, STEP_DEPT_HEAD_APPROVE, "部门负责人审批"));
-
-    // Step 3: PM_TECH_REVIEW
-    steps.add(buildStepProgress(approval, milestoneCode, STEP_PM_TECH_REVIEW, "PM技术初评"));
-
-    // Step 4: COMPLIANCE_OPINION (G5/G9跳过)
-    if (!skipCompliance) {
-      steps.add(buildStepProgress(approval, milestoneCode, STEP_COMPLIANCE_OPINION, "药政合规部合规意见"));
-    }
-
-    // Step 5: PMC_DECISION or PM_INTERNAL_REVIEW
-    String finalStepName = isPmInternal ? "PM项目组内部评审" : "PMC决策评审";
-    String finalStepCode = isPmInternal ? STEP_PM_INTERNAL_REVIEW : STEP_PMC_DECISION;
-    steps.add(buildStepProgress(approval, milestoneCode, finalStepCode, finalStepName));
+    List<ReviewProgressResponse.StepProgress> steps = descriptors.stream()
+        .map(descriptor -> buildStepProgress(approval, pm, milestoneCode, descriptor, currentActiveStep))
+        .collect(Collectors.toList());
 
     // 确定当前步骤
     String currentStep = determineCurrentStep(steps, pm.getStatus());
@@ -742,16 +793,41 @@ public class ReviewService {
   }
 
   private ReviewProgressResponse.StepProgress buildStepProgress(
-      ReviewApprovalEntity approval, String milestoneCode, String stepCode, String stepName) {
-    if (approval == null) {
+      ReviewApprovalEntity approval, ProjectMilestoneEntity pm,
+      String milestoneCode, WorkflowStepDescriptor descriptor, String currentActiveStep) {
+    String stepCode = descriptor.normalizedStepCode();
+    String stepName = descriptor.nodeName();
+    boolean isUploadStep = STEP_UPLOAD.equals(stepCode)
+        || Boolean.TRUE.equals(descriptor.isUploader())
+        || "UPLOAD".equals(descriptor.nodeType());
+
+    if (isUploadStep) {
+      String status = approval == null ? "IN_PROGRESS" : "APPROVED";
+      LocalDateTime completedAt = approval != null ? approval.getSubmittedAt() : null;
       return new ReviewProgressResponse.StepProgress(
-          stepCode, stepName, "PENDING", null, List.of());
+          stepCode, stepName, descriptor.nodeCode(), descriptor.nodeType(), status, completedAt,
+          descriptor.approverRule(), descriptor.approverRuleLabel(), descriptor.expectedApproverLabel(),
+          approval == null, false, List.of());
     }
 
-    List<ReviewApprovalTaskEntity> tasks = reviewApprovalTaskRepository
-        .findByReviewApprovalIdAndStepCode(approval.getId(), stepCode);
+    if (approval == null) {
+      return new ReviewProgressResponse.StepProgress(
+          stepCode, stepName, descriptor.nodeCode(), descriptor.nodeType(), "PENDING", null,
+          descriptor.approverRule(), descriptor.approverRuleLabel(), descriptor.expectedApproverLabel(),
+          false, true, List.of());
+    }
 
-    String status = tasks.isEmpty() ? "PENDING" : determineStepStatus(tasks);
+    List<ReviewApprovalTaskEntity> tasks = findTasksForStep(approval.getId(), descriptor);
+
+    boolean active = currentActiveStep != null && stepCode.equals(currentActiveStep);
+    String status = tasks.isEmpty() ? (active ? "IN_PROGRESS" : "PENDING") : determineStepStatus(tasks);
+    boolean future = !active && !"APPROVED".equals(status) && !"REJECTED".equals(status);
+
+    boolean revealTaskDetails = currentActiveStep == null
+        || isUploadStep
+        || active
+        || "APPROVED".equals(status)
+        || "REJECTED".equals(status);
 
     LocalDateTime completedAt = tasks.stream()
         .filter(t -> t.getDecidedAt() != null)
@@ -759,18 +835,22 @@ public class ReviewService {
         .max(LocalDateTime::compareTo)
         .orElse(null);
 
-    List<ReviewProgressResponse.TaskDetail> taskDetails = tasks.stream()
-        .map(t -> {
-          String name = iamUserRepository.findById(t.getApproverUserId())
-              .map(IamUserEntity::getDisplayName).orElse("未知用户");
-          return new ReviewProgressResponse.TaskDetail(
-              t.getId(), t.getApproverUserId(), name, t.getApproverRole(),
-              t.getDeliverableSlotCode(), t.getDecision(), t.getOpinion(),
-              t.getDecidedAt(), t.getStatus().name());
-        }).collect(Collectors.toList());
+    List<ReviewProgressResponse.TaskDetail> taskDetails = revealTaskDetails
+        ? tasks.stream()
+            .map(t -> {
+              String name = iamUserRepository.findById(t.getApproverUserId())
+                  .map(IamUserEntity::getDisplayName).orElse("未知用户");
+              return new ReviewProgressResponse.TaskDetail(
+                  t.getId(), t.getApproverUserId(), name, t.getApproverRole(),
+                  t.getDeliverableSlotCode(), t.getDecision(), t.getOpinion(),
+                  t.getDecidedAt(), t.getStatus().name());
+            }).collect(Collectors.toList())
+        : List.of();
 
     return new ReviewProgressResponse.StepProgress(
-        stepCode, stepName, status, completedAt, taskDetails);
+        stepCode, stepName, descriptor.nodeCode(), descriptor.nodeType(), status, completedAt,
+        descriptor.approverRule(), descriptor.approverRuleLabel(), descriptor.expectedApproverLabel(),
+        active, future, taskDetails);
   }
 
   private String determineStepStatus(List<ReviewApprovalTaskEntity> tasks) {
@@ -851,18 +931,110 @@ public class ReviewService {
     String stepCode = task.getStepCode();
     if (stepCode == null) {
       // 兼容旧数据：从approverRole推断
-      stepCode = switch (task.getApproverRole()) {
-        case "ROLE_DEPT_HEAD" -> STEP_DEPT_HEAD_APPROVE;
-        case "ROLE_PM" -> STEP_PM_TECH_REVIEW;
-        case "ROLE_COMPLIANCE" -> STEP_COMPLIANCE_OPINION;
-        case "ROLE_PMC" -> STEP_PMC_DECISION;
-        default -> STEP_PMC_DECISION;
-      };
+      stepCode = normalizeStepCode(null, task.getApproverRole(), securityHelper.getCurrentUserId());
     }
 
+    log.info("executeDecision bridge: projectId={}, taskId={}, currentUserId={}, requestActorUserId={}, taskStepCode={}, taskApproverRole={}, requestDecision={}",
+        projectId, taskId, securityHelper.getCurrentUserId(), request.actorUserId(), stepCode,
+        task.getApproverRole(), request.decision());
+
     StepApproveRequest stepRequest = new StepApproveRequest(
-        request.actorUserId(), stepCode, request.decision(), request.opinion(), null, null);
+        securityHelper.getCurrentUserId(), stepCode, request.decision(), request.opinion(), null, null);
     return approveStep(projectId, stepRequest);
+  }
+
+  private String normalizeRequestedStepCode(String stepCode, Long currentUserId) {
+    if (stepCode == null) {
+      return null;
+    }
+    String normalized = stepCode.trim().toUpperCase(Locale.ROOT);
+    if ("ROLE_APPROVE".equals(normalized)) {
+      if (hasRole(currentUserId, "ROLE_DEPT_HEAD") || isDepartmentHeadByAssignment(currentUserId)) {
+        return STEP_DEPT_HEAD_APPROVE;
+      }
+      if (hasRole(currentUserId, "ROLE_COMPLIANCE")) {
+        return STEP_COMPLIANCE_OPINION;
+      }
+      if (hasRole(currentUserId, "ROLE_PM")) {
+        return STEP_PM_TECH_REVIEW;
+      }
+    }
+    if ("DECISION".equals(normalized)) {
+      if (hasRole(currentUserId, "ROLE_PMC")) {
+        return STEP_PMC_DECISION;
+      }
+      if (hasRole(currentUserId, "ROLE_PM")) {
+        return STEP_PM_INTERNAL_REVIEW;
+      }
+    }
+    return normalized;
+  }
+
+  private String normalizeStepCode(String stepCode, String approverRole, Long currentUserId) {
+    if (stepCode != null) {
+      String normalized = stepCode.trim().toUpperCase(Locale.ROOT);
+      switch (normalized) {
+        case STEP_DEPT_HEAD_APPROVE:
+        case STEP_PM_TECH_REVIEW:
+        case STEP_COMPLIANCE_OPINION:
+        case STEP_PMC_DECISION:
+        case STEP_PM_INTERNAL_REVIEW:
+        case STEP_UPLOAD:
+          return normalized;
+        case "ROLE_APPROVE":
+          if ("ROLE_DEPT_HEAD".equals(approverRole) || "DEPT_HEAD".equals(approverRole)) {
+            return STEP_DEPT_HEAD_APPROVE;
+          }
+          if ("ROLE_PM".equals(approverRole)) return STEP_PM_TECH_REVIEW;
+          if ("ROLE_COMPLIANCE".equals(approverRole)) return STEP_COMPLIANCE_OPINION;
+          if (hasRole(currentUserId, "ROLE_DEPT_HEAD") || isDepartmentHeadByAssignment(currentUserId)) {
+            return STEP_DEPT_HEAD_APPROVE;
+          }
+          if (hasRole(currentUserId, "ROLE_COMPLIANCE")) return STEP_COMPLIANCE_OPINION;
+          if (hasRole(currentUserId, "ROLE_PM")) return STEP_PM_TECH_REVIEW;
+          return normalized;
+        case "DECISION":
+          if ("ROLE_PM".equals(approverRole)) return STEP_PM_INTERNAL_REVIEW;
+          if ("ROLE_PMC".equals(approverRole)) return STEP_PMC_DECISION;
+          if (hasRole(currentUserId, "ROLE_PMC")) return STEP_PMC_DECISION;
+          if (hasRole(currentUserId, "ROLE_PM")) return STEP_PM_INTERNAL_REVIEW;
+          return normalized;
+        default:
+          break;
+      }
+    }
+
+    if ("ROLE_DEPT_HEAD".equals(approverRole) || "DEPT_HEAD".equals(approverRole)) {
+      return STEP_DEPT_HEAD_APPROVE;
+    }
+    if ("ROLE_PM".equals(approverRole)) {
+      return STEP_PM_TECH_REVIEW;
+    }
+    if ("ROLE_COMPLIANCE".equals(approverRole)) {
+      return STEP_COMPLIANCE_OPINION;
+    }
+    if ("ROLE_PMC".equals(approverRole)) {
+      return STEP_PMC_DECISION;
+    }
+    return stepCode != null ? stepCode.trim().toUpperCase(Locale.ROOT) : STEP_PMC_DECISION;
+  }
+
+  private boolean hasRole(Long userId, String roleName) {
+    if (userId == null || roleName == null) {
+      return false;
+    }
+    return userRepository.findById(userId)
+        .map(user -> user.getRoles() != null && user.getRoles().stream()
+            .anyMatch(role -> roleName.equals(role.getName())))
+        .orElse(false);
+  }
+
+  private boolean isDepartmentHeadByAssignment(Long userId) {
+    if (userId == null) {
+      return false;
+    }
+    return orgDepartmentRepository.findAll().stream()
+        .anyMatch(dept -> userId.equals(dept.getHeadUserId()));
   }
 
   @Transactional(readOnly = true)
@@ -956,6 +1128,13 @@ public class ReviewService {
         ReviewApprovalEntity approval = reviewApprovalRepository
             .findById(task.getReviewApprovalId()).orElse(null);
         if (approval == null || approval.getStatus() != ReviewApprovalEntity.Status.SUBMITTED) continue;
+        String currentActiveStep = resolveCurrentActiveStep(approval.getId());
+        String normalizedTaskStep = normalizeStepCode(task.getStepCode(), task.getApproverRole(), task.getApproverUserId());
+        if (currentActiveStep != null && normalizedTaskStep != null && !currentActiveStep.equals(normalizedTaskStep)) {
+          log.info("跳过非当前激活步骤的评审批办: userId={}, taskId={}, approvalId={}, taskStepCode={}, currentActiveStep={}",
+              userId, task.getId(), approval.getId(), normalizedTaskStep, currentActiveStep);
+          continue;
+        }
         ProjectEntity project = projectRepository.findById(approval.getProjectId()).orElse(null);
         if (project == null) continue;
 
@@ -974,7 +1153,7 @@ public class ReviewService {
         result.add(new PendingReviewTaskDto(
             task.getId(), approval.getId(), project.getId(), project.getProjectName(),
             project.getProjectCode(), milestoneName, milestoneCode,
-            submitterName, approval.getSubmittedAt(), task.getStepCode() != null ? task.getStepCode() : task.getApproverRole(),
+            submitterName, approval.getSubmittedAt(), normalizedTaskStep != null ? normalizedTaskStep : task.getApproverRole(),
             "MILESTONE"));
       } catch (Exception e) { /* skip */ }
     }
@@ -1012,6 +1191,31 @@ public class ReviewService {
       return b.submittedAt().compareTo(a.submittedAt());
     });
     return result;
+  }
+
+  private String resolveCurrentActiveStep(Long reviewApprovalId) {
+    if (reviewApprovalId == null) {
+      return null;
+    }
+    List<ReviewApprovalTaskEntity> allTasks = reviewApprovalTaskRepository
+        .findByReviewApprovalIdOrderBySortOrderAsc(reviewApprovalId);
+    return allTasks.stream()
+        .filter(t -> t.getStatus() == ReviewApprovalTaskEntity.Status.PENDING)
+        .min(Comparator.comparing(ReviewApprovalTaskEntity::getSortOrder,
+            Comparator.nullsLast(Integer::compareTo)))
+        .map(t -> normalizeStepCode(t.getStepCode(), t.getApproverRole(), t.getApproverUserId()))
+        .orElse(null);
+  }
+
+  private List<ReviewApprovalTaskEntity> findTasksForStep(Long reviewApprovalId, WorkflowStepDescriptor descriptor) {
+    String expectedStepCode = descriptor.normalizedStepCode();
+    List<ReviewApprovalTaskEntity> allTasks = reviewApprovalTaskRepository
+        .findByReviewApprovalIdOrderBySortOrderAsc(reviewApprovalId);
+    return allTasks.stream()
+        .filter(task -> expectedStepCode.equals(task.getStepCode())
+            || expectedStepCode.equals(
+                normalizeStepCode(task.getStepCode(), task.getApproverRole(), task.getApproverUserId())))
+        .toList();
   }
 
   // ==================== 私有辅助方法 ====================
@@ -1123,5 +1327,88 @@ public class ReviewService {
     notificationService.sendNotificationToDeptExecutors(
         actor.getDeptId(), "DELIVERABLE_UPLOADED", title, content,
         project.getId(), milestoneCode, actor.getId());
+  }
+
+  private StepApproveRequest rewriteActor(StepApproveRequest request, Long actorUserId) {
+    return new StepApproveRequest(
+        actorUserId,
+        request.stepCode(),
+        request.decision(),
+        request.opinion(),
+        request.techReview(),
+        request.complianceOpinion());
+  }
+
+  private void syncPendingReviewTodos(ProjectEntity project, ProjectMilestoneEntity pm,
+                                      MilestoneDefEntity def, ReviewApprovalEntity approval) {
+    notificationService.completeTodoByProjectAndMilestone(
+        project.getId(), def.getMilestoneCode(), "REVIEW_APPROVAL");
+
+    // 获取所有任务，按排序号升序
+    List<ReviewApprovalTaskEntity> allTasks = reviewApprovalTaskRepository
+        .findByReviewApprovalIdOrderBySortOrderAsc(approval.getId());
+
+    // 找出当前活跃步骤（排序号最小的 PENDING 步骤），只通知该步骤的审批人
+    Integer currentStepSortNo = allTasks.stream()
+        .filter(t -> t.getStatus() == ReviewApprovalTaskEntity.Status.PENDING)
+        .map(ReviewApprovalTaskEntity::getSortOrder)
+        .min(Integer::compareTo)
+        .orElse(null);
+
+    if (currentStepSortNo == null) {
+      return; // 没有待处理的步骤
+    }
+
+    // 仅通知当前活跃步骤的审批人（而非所有后续步骤）
+    List<ReviewApprovalTaskEntity> currentStepTasks = allTasks.stream()
+        .filter(t -> t.getStatus() == ReviewApprovalTaskEntity.Status.PENDING
+            && Integer.valueOf(t.getSortOrder()).equals(currentStepSortNo))
+        .toList();
+
+    String milestoneName = def.getMilestoneName();
+    for (ReviewApprovalTaskEntity task : currentStepTasks) {
+      if (task.getApproverUserId() == null) {
+        continue;
+      }
+
+      String title = "评审待办：" + milestoneName;
+      String content = "[" + project.getProjectName() + "][" + milestoneName + "] 当前待处理节点："
+          + resolveStepDisplayName(def.getMilestoneCode(), project, task.getStepCode(), task.getApproverRole(), task.getApproverUserId());
+      notificationService.sendNotification(
+          task.getApproverUserId(),
+          "REVIEW_APPROVAL",
+          title,
+          content,
+          project.getId(),
+          def.getMilestoneCode(),
+          approval.getSubmitterUserId(),
+          true);
+    }
+  }
+
+  private String resolveStepDisplayName(String milestoneCode, ProjectEntity project,
+      String stepCode, String approverRole, Long approverUserId) {
+    try {
+      String normalized = normalizeStepCode(stepCode, approverRole, approverUserId);
+      return wfProcessService.getMilestoneStepDescriptors(milestoneCode, project).stream()
+          .filter(descriptor -> Objects.equals(descriptor.normalizedStepCode(), normalized))
+          .map(WorkflowStepDescriptor::nodeName)
+          .findFirst()
+          .orElse(resolveStepDisplayName(normalized));
+    } catch (Exception e) {
+      return resolveStepDisplayName(stepCode);
+    }
+  }
+
+  private String resolveStepDisplayName(String stepCode) {
+    return switch (stepCode) {
+      case STEP_UPLOAD -> "交付物上传";
+      case STEP_DEPT_HEAD_APPROVE -> "部门负责人审批";
+      case STEP_PM_TECH_REVIEW -> "PM技术初评";
+      case STEP_COMPLIANCE_OPINION -> "药政合规部合规意见";
+      case STEP_PM_INTERNAL_REVIEW -> "PM项目组内部评审";
+      case STEP_PMC_DECISION -> "PMC决策评审";
+      default -> stepCode;
+    };
   }
 }

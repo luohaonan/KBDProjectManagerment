@@ -185,4 +185,18 @@ public class DocumentService {
     return documentRepository.findById(id)
         .orElseThrow(() -> new ApiException(404, "文档不存在"));
   }
+
+  /** 旧文档接口也必须遵守交付物管理的统一可见性规则。 */
+  @Transactional(readOnly = true)
+  public void assertCanView(DocumentEntity document) {
+    long currentUserId = securityHelper.getCurrentUserId();
+    User user = userRepository.findById(currentUserId).orElseThrow(() -> new ApiException(401, "用户不存在"));
+    List<String> roles = user.getRoles().stream().map(Role::getName).toList();
+    boolean global = roles.contains("ROLE_ADMIN") || roles.contains("ROLE_PROJECT_ADMIN")
+        || roles.contains("ROLE_PMC")
+        || (user.getDepartments() != null && user.getDepartments().stream().anyMatch(dept ->
+            dept.getDeptName() != null && dept.getDeptName().contains("效率管理")));
+    if (global || document.getUploader().equals(currentUserId)) return;
+    throw new ApiException(403, "无权访问该文档");
+  }
 }

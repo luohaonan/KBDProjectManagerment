@@ -25,7 +25,7 @@ public class NotificationEntity {
   @Column(name = "project_id")
   private Long projectId;
 
-  @Column(name = "milestone_code", length = 8)
+  @Column(name = "milestone_code", length = 64)
   private String milestoneCode;
 
   @Column(name = "related_user_id")

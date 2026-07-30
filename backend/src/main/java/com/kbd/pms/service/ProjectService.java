@@ -24,6 +24,7 @@ import com.kbd.pms.repository.IamUserRepository;
 import com.kbd.pms.repository.MilestoneDefRepository;
 import com.kbd.pms.repository.MilestoneDeptRoleRepository;
 import com.kbd.pms.repository.MilestoneHistoryRepository;
+import com.kbd.pms.repository.NotificationRepository;
 import com.kbd.pms.repository.OrgDepartmentRepository;
 import com.kbd.pms.repository.ProjectBudgetLedgerRepository;
 import com.kbd.pms.repository.ProjectBudgetPlanRepository;
@@ -49,6 +50,7 @@ import com.kbd.pms.workflow.WfProcessDefinition;
 import com.kbd.pms.workflow.WfProcessNode;
 import com.kbd.pms.workflow.WfProcessRepository;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.time.Instant;
@@ -93,6 +95,7 @@ public class ProjectService {
   private final WfProcessRepository wfProcessRepository;
   private final SecurityHelper securityHelper;
   private final com.kbd.pms.repository.UserRepository userRepository;
+  private final NotificationRepository notificationRepository;
   private final NotificationService notificationService;
 
   public ProjectService(
@@ -123,6 +126,7 @@ public class ProjectService {
       WfProcessRepository wfProcessRepository,
       SecurityHelper securityHelper,
       com.kbd.pms.repository.UserRepository userRepository,
+      NotificationRepository notificationRepository,
       NotificationService notificationService) {
     this.projectRepository = projectRepository;
     this.projectLevelRepository = projectLevelRepository;
@@ -151,6 +155,7 @@ public class ProjectService {
     this.wfProcessRepository = wfProcessRepository;
     this.securityHelper = securityHelper;
     this.userRepository = userRepository;
+    this.notificationRepository = notificationRepository;
     this.notificationService = notificationService;
   }
 
@@ -246,6 +251,20 @@ public class ProjectService {
 
     ProjectEntity saved = projectRepository.save(project);
 
+    if (isAdminCreated && saved.getPmUserId() != null) {
+      String title = "请完善项目信息";
+      String content = "项目管理员已创建项目 [" + saved.getProjectName() + "]，请尽快完善项目信息";
+      notificationService.sendNotification(
+          saved.getPmUserId(),
+          "PROJECT_COMPLETION",
+          title,
+          content,
+          saved.getId(),
+          PmsConstants.MILESTONE_CODE_G0,
+          iamUserId,
+          true);
+    }
+
     List<MilestoneDefEntity> defs = milestoneDefRepository.findAllByIsActiveTrueOrderBySortNoAsc();
     for (MilestoneDefEntity def : defs) {
       ProjectMilestoneEntity row = new ProjectMilestoneEntity();
@@ -307,11 +326,9 @@ public class ProjectService {
     project.setRiskCompetitive(request.riskCompetitive());
     project.setRiskRegulatory(request.riskRegulatory());
     project.setSuggestionAndSupport(request.suggestionAndSupport());
-    // 如果项目处于 DRAFT 状态且 PM 完善了信息（有 indication），自动转为 ACTIVE
+    // 如果项目处于 DRAFT 状态且 PM 已提交更新，自动转为 ACTIVE
     boolean wasDraft = project.getStatus() == Enums.ProjectStatus.DRAFT;
-    if (wasDraft
-        && request.indication() != null
-        && !request.indication().isEmpty()) {
+    if (wasDraft) {
       project.setStatus(Enums.ProjectStatus.ACTIVE);
     }
     // 不更新 updated_by（外键引用 iam_user 表），仅更新 updated_at
@@ -319,9 +336,11 @@ public class ProjectService {
 
     projectRepository.save(project);
 
-    // 触发器：项目从 DRAFT 转为 ACTIVE → 通知当前里程碑（G0）的上传部门执行人
+    // 触发器：项目从 DRAFT 转为 ACTIVE → 关闭完善项目信息待办，并通知当前里程碑的上传部门执行人
     if (wasDraft && project.getStatus() == Enums.ProjectStatus.ACTIVE) {
       try {
+        notificationService.completeTodoByProjectAndMilestone(
+            project.getId(), PmsConstants.MILESTONE_CODE_G0, "PROJECT_COMPLETION");
         notifyExecutorsForProjectActivation(project);
       } catch (Exception e) {
         // 通知发送失败不应影响主业务流程，但记录日志用于调试
@@ -370,6 +389,7 @@ public class ProjectService {
     projectBudgetLedgerRepository.deleteByProjectId(projectId);
     documentRepository.deleteByProjectId(projectId);
     budgetLimitRepository.deleteByProjectId(projectId);
+    notificationRepository.deleteByProjectId(projectId);
 
     projectRepository.delete(project);
   }
@@ -498,17 +518,47 @@ public class ProjectService {
   }
 
   private BudgetExecutionSummaryDto buildBudgetSummary(long projectId) {
-    return projectBudgetSnapshotRepository
-        .findFirstByProjectIdOrderBySnapshotMonthDesc(projectId)
-        .map(
-            s ->
-                new BudgetExecutionSummaryDto(
-                    s.getPlannedTotalAmount(),
-                    s.getTotalSpent(),
-                    s.getUtilizationRatio(),
-                    s.getWarningLevel() == null ? null : s.getWarningLevel().name(),
-                    s.getSnapshotMonth()))
-        .orElse(new BudgetExecutionSummaryDto(null, null, null, null, null));
+    ProjectEntity project = projectRepository.findById(projectId).orElse(null);
+    BigDecimal plannedTotalAmount = project != null && project.getBudgetTotal() != null
+        ? project.getBudgetTotal()
+        : BigDecimal.ZERO;
+    BigDecimal totalSpent = projectBudgetLedgerRepository.findByProjectId(projectId).stream()
+        .map(entry -> entry.getAmount() == null ? BigDecimal.ZERO : entry.getAmount())
+        .reduce(BigDecimal.ZERO, BigDecimal::add);
+    BigDecimal utilizationRatio = plannedTotalAmount.signum() > 0
+        ? totalSpent.divide(plannedTotalAmount, 4, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))
+        : BigDecimal.ZERO;
+
+    var latestSnapshot = projectBudgetSnapshotRepository.findFirstByProjectIdOrderBySnapshotMonthDesc(projectId).orElse(null);
+    String snapshotMonth = latestSnapshot != null ? latestSnapshot.getSnapshotMonth() : null;
+    String warningLevel = resolveBudgetWarningLevel(utilizationRatio).name();
+
+    return new BudgetExecutionSummaryDto(
+        plannedTotalAmount,
+        totalSpent,
+        utilizationRatio,
+        warningLevel,
+        snapshotMonth);
+  }
+
+  private Enums.WarningLevel resolveBudgetWarningLevel(BigDecimal utilizationPercent) {
+    if (utilizationPercent == null) {
+      return Enums.WarningLevel.NONE;
+    }
+    if (utilizationPercent.compareTo(BigDecimal.valueOf(95)) >= 0) {
+      return Enums.WarningLevel.RED;
+    }
+    if (utilizationPercent.compareTo(resolveBudgetWarningThresholdPercent()) >= 0) {
+      return Enums.WarningLevel.YELLOW;
+    }
+    return Enums.WarningLevel.NONE;
+  }
+
+  private BigDecimal resolveBudgetWarningThresholdPercent() {
+    return wfProcessRepository.findByProcessTypeAndMilestoneCodeIsNullAndIsActiveTrue("BUDGET")
+        .map(WfProcessDefinition::getBudgetWarningThreshold)
+        .filter(value -> value != null && value.signum() > 0)
+        .orElse(BigDecimal.valueOf(80));
   }
 
   public List<ProjectDetailResponse> getVisibleProjects(String username) {
@@ -824,7 +874,7 @@ public class ProjectService {
             log.debug("向部门 {} 的执行人发送通知: projectId={}", deptId, project.getId());
             if (notifiedDeptIds.add(deptId)) {
               notificationService.sendNotificationToDeptExecutors(
-                  deptId, "PROJECT_COMPLETION", title, content,
+                  deptId, "DELIVERABLE", title, content,
                   project.getId(), milestoneCode, null, true);
             }
           } catch (NumberFormatException e) {

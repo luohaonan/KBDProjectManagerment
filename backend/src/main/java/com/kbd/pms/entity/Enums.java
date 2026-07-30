@@ -32,7 +32,7 @@ public final class Enums {
 
   public enum ApprovalStatus { DRAFT, SUBMITTED, APPROVED, REJECTED }
 
-  public enum ExpenseCategory { INTERNAL, EXTERNAL }
+  public enum ExpenseCategory { INTERNAL, EXTERNAL, EQUIPMENT, TRAVEL, CONSULTING, OTHER }
 
   public enum WarningLevel { NONE, YELLOW, RED }
 
@@ -61,4 +61,5 @@ public final class Enums {
 
   public enum TerminationTaskStatus { OPEN, COMPLETED, OVERDUE }
 }
+
 

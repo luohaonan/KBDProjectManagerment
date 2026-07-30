@@ -16,6 +16,115 @@ const selectableTagActiveClass = 'bg-blue-100 border-blue-300 text-slate-900';
 const managementTabClass = 'rounded-md border border-slate-300 bg-white px-4 py-2 text-slate-700 shadow-none hover:bg-slate-100';
 const managementTabActiveClass = 'bg-blue-100 border-blue-300 text-slate-900';
 
+type PermissionRisk = 'high' | 'medium' | 'workflow' | 'weak' | 'normal';
+
+interface PermissionMeta {
+  module: string;
+  risk: PermissionRisk;
+  riskLabel: string;
+  note: string;
+}
+
+const DEFAULT_PERMISSION_META: PermissionMeta = {
+  module: '其他 / 未分类',
+  risk: 'normal',
+  riskLabel: '普通',
+  note: '当前未配置专项说明，请结合业务测试确认实际影响。',
+};
+
+const PERMISSION_META_MAP: Record<string, PermissionMeta> = {
+  PERMISSION_DELETE_PROJECT: {
+    module: '项目管理',
+    risk: 'high',
+    riskLabel: '高风险',
+    note: '控制项目删除能力，删除项目会级联影响评审、立项、预算、交付物、通知等业务数据。',
+  },
+  PERMISSION_CREATE_PROJECT: {
+    module: '项目管理',
+    risk: 'weak',
+    riskLabel: '弱生效',
+    note: '当前创建入口主要由 ROLE_ADMIN / ROLE_PROJECT_ADMIN 控制，本权限疑似未完全接入后端校验。',
+  },
+  PERMISSION_VIEW_ALL_PROJECTS: {
+    module: '项目管理',
+    risk: 'weak',
+    riskLabel: '弱生效',
+    note: '当前项目可见性主要由角色和业务逻辑控制，本权限疑似未完全接入后端校验。',
+  },
+  PERMISSION_BUDGET_VIEW: {
+    module: '预算管理',
+    risk: 'weak',
+    riskLabel: '弱生效',
+    note: '当前预算查看还受到项目 PM、审批人、申请人等业务身份限制。',
+  },
+  PERMISSION_BUDGET_MANAGE: {
+    module: '预算管理',
+    risk: 'high',
+    riskLabel: '高风险',
+    note: '控制预算调整和支出管理，但仍需满足项目 PM / 项目管理员等业务身份条件。',
+  },
+  PERMISSION_DELIVERABLE_VIEW: {
+    module: '交付物管理',
+    risk: 'weak',
+    riskLabel: '弱生效',
+    note: '当前疑似基础查看/预留权限，实际查看范围还受到角色、上传者、部门、项目关系限制。',
+  },
+  PERMISSION_DELIVERABLE_VIEW_ALL: {
+    module: '交付物管理',
+    risk: 'medium',
+    riskLabel: '中高风险',
+    note: '控制项目交付物全量查看能力，同时兼容管理员、项目管理员、PMC 等角色。',
+  },
+  PERMISSION_DELIVERABLE_IMPORT: {
+    module: '交付物管理',
+    risk: 'high',
+    riskLabel: '高风险',
+    note: '控制历史交付物导入能力，会影响项目资料完整性和历史文件归档。',
+  },
+  PERMISSION_APPROVE_INITIATION: {
+    module: '审批流程',
+    risk: 'workflow',
+    riskLabel: '流程关键',
+    note: '用于立项审批人候选分配，修改后可能影响立项审批任务能否正常生成。',
+  },
+};
+
+const PERMISSION_MODULE_ORDER = ['项目管理', '预算管理', '交付物管理', '审批流程', '账号与组织', '系统配置', '其他 / 未分类'];
+
+const getPermissionMeta = (permissionName: string): PermissionMeta => {
+  return PERMISSION_META_MAP[permissionName] || DEFAULT_PERMISSION_META;
+};
+
+const getRiskBadgeClass = (risk: PermissionRisk) => {
+  switch (risk) {
+    case 'high':
+      return 'bg-red-100 text-red-700 border-red-300';
+    case 'medium':
+      return 'bg-orange-100 text-orange-700 border-orange-300';
+    case 'workflow':
+      return 'bg-purple-100 text-purple-700 border-purple-300';
+    case 'weak':
+      return 'bg-amber-100 text-amber-700 border-amber-300';
+    default:
+      return 'bg-slate-100 text-slate-700 border-slate-300';
+  }
+};
+
+const groupPermissionsByModule = (items: PermissionInfo[]) => {
+  const groups = items.reduce<Record<string, PermissionInfo[]>>((acc, permission) => {
+    const moduleName = getPermissionMeta(permission.name).module;
+    if (!acc[moduleName]) acc[moduleName] = [];
+    acc[moduleName].push(permission);
+    return acc;
+  }, {});
+
+  return Object.entries(groups).sort(([a], [b]) => {
+    const indexA = PERMISSION_MODULE_ORDER.indexOf(a);
+    const indexB = PERMISSION_MODULE_ORDER.indexOf(b);
+    return (indexA === -1 ? 999 : indexA) - (indexB === -1 ? 999 : indexB);
+  });
+};
+
 interface UserInfo {
   id: number;
   username: string;
@@ -53,6 +162,19 @@ interface DepartmentInfo {
   memberCount: number;
 }
 
+interface EditUserForm {
+  userId: number;
+  originalUsername: string;
+  username: string;
+  email: string;
+  departmentIds: number[];
+}
+
+interface PermissionChangePreview {
+  added: PermissionInfo[];
+  removed: PermissionInfo[];
+}
+
 const AccountManagement: React.FC = () => {
   const navigate = useNavigate();
   const { user, hasRole } = useAuth();
@@ -63,9 +185,11 @@ const AccountManagement: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'users' | 'roles' | 'departments'>('users');
   const [showCreateUser, setShowCreateUser] = useState(false);
+  const [showEditUser, setShowEditUser] = useState<EditUserForm | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState<{ userId: number; username: string } | null>(null);
   const [showRoleModal, setShowRoleModal] = useState<{ userId: number; username: string; currentRoles: string[] } | null>(null);
   const [showPermissionModal, setShowPermissionModal] = useState<RoleInfo | null>(null);
+  const [permissionChangePreview, setPermissionChangePreview] = useState<PermissionChangePreview | null>(null);
   const [showDeptDetail, setShowDeptDetail] = useState<DepartmentInfo | null>(null);
   const [deptMembers, setDeptMembers] = useState<UserInfo[]>([]);
   const [loadingDeptMembers, setLoadingDeptMembers] = useState(false);
@@ -145,6 +269,26 @@ const AccountManagement: React.FC = () => {
     }
   };
 
+  const handleUpdateUser = async () => {
+    if (!showEditUser) return;
+    if (!showEditUser.username.trim()) {
+      toast.error('用户名不能为空');
+      return;
+    }
+    try {
+      await api.put(`/api/users/${showEditUser.userId}`, {
+        username: showEditUser.username.trim(),
+        email: showEditUser.email.trim(),
+        departmentIds: showEditUser.departmentIds,
+      });
+      toast.success('账号信息更新成功');
+      setShowEditUser(null);
+      loadData();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || '更新账号信息失败');
+    }
+  };
+
   const handleUpdateRoles = async () => {
     if (!showRoleModal) return;
     try {
@@ -162,6 +306,7 @@ const AccountManagement: React.FC = () => {
     try {
       await api.put(`/api/users/roles/${showPermissionModal.id}/permissions`, { permissions: selectedPermissions });
       toast.success('权限更新成功');
+      setPermissionChangePreview(null);
       setShowPermissionModal(null);
       loadData();
     } catch (error: any) {
@@ -169,13 +314,60 @@ const AccountManagement: React.FC = () => {
     }
   };
 
+  const getPermissionInfoByName = (name: string): PermissionInfo => {
+    return permissions.find(p => p.name === name) || { id: 0, name, description: '' };
+  };
+
+  const buildPermissionChangePreview = (): PermissionChangePreview => {
+    if (!showPermissionModal) return { added: [], removed: [] };
+
+    const originalNames = new Set(showPermissionModal.permissions.map(p => p.name));
+    const selectedNames = new Set(selectedPermissions);
+
+    const added = selectedPermissions
+      .filter(name => !originalNames.has(name))
+      .map(getPermissionInfoByName);
+
+    const removed = showPermissionModal.permissions
+      .map(p => p.name)
+      .filter(name => !selectedNames.has(name))
+      .map(getPermissionInfoByName);
+
+    return { added, removed };
+  };
+
+  const handlePreviewPermissionChanges = () => {
+    const preview = buildPermissionChangePreview();
+    if (preview.added.length === 0 && preview.removed.length === 0) {
+      toast.info('权限没有变化，无需保存');
+      return;
+    }
+    setPermissionChangePreview(preview);
+  };
+
+  const closePermissionModal = () => {
+    setPermissionChangePreview(null);
+    setShowPermissionModal(null);
+  };
+
   const openRoleModal = (u: UserInfo) => {
     setSelectedRoles(u.roles);
     setShowRoleModal({ userId: u.id, username: u.username, currentRoles: u.roles });
   };
 
+  const openEditUserModal = (u: UserInfo) => {
+    setShowEditUser({
+      userId: u.id,
+      originalUsername: u.username,
+      username: u.username,
+      email: u.email || '',
+      departmentIds: u.departmentIds || [],
+    });
+  };
+
   const openPermissionModal = (r: RoleInfo) => {
     setSelectedPermissions(r.permissions.map(p => p.name));
+    setPermissionChangePreview(null);
     setShowPermissionModal(r);
   };
 
@@ -457,6 +649,15 @@ const AccountManagement: React.FC = () => {
                             <Button
                               size="sm"
                               variant="outline"
+                              onClick={() => openEditUserModal(u)}
+                              className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                              title="修改账号信息"
+                            >
+                              <Edit3 className="w-3 h-3" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
                               onClick={() => setShowPasswordModal({ userId: u.id, username: u.username })}
                               className="border-slate-600 text-slate-300 hover:bg-slate-700"
                               title="修改密码"
@@ -603,12 +804,37 @@ const AccountManagement: React.FC = () => {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <div className="flex flex-wrap gap-1">
-                      {role.permissions.map(p => (
-                        <Badge key={p.name} variant="outline" className={lightTagClassXs}>
-                          {p.name}
-                        </Badge>
-                      ))}
+                    <div className="space-y-3">
+                      {role.permissions.length === 0 ? (
+                        <p className="text-sm text-slate-500">该权限组暂未分配权限</p>
+                      ) : (
+                        groupPermissionsByModule(role.permissions).map(([moduleName, modulePermissions]) => (
+                          <div key={moduleName} className="rounded-md border border-slate-700 bg-slate-900/40 p-3">
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <p className="text-sm font-medium text-slate-200">{moduleName}</p>
+                              <Badge variant="outline" className="bg-slate-700 text-slate-300 border-slate-600 text-xs">
+                                {modulePermissions.length} 项
+                              </Badge>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {modulePermissions.map(p => {
+                                const meta = getPermissionMeta(p.name);
+                                return (
+                                  <div key={p.name} className="rounded border border-slate-700 bg-slate-800 px-2 py-1">
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      <span className="text-xs font-medium text-slate-100">{p.name}</span>
+                                      <Badge variant="outline" className={`${getRiskBadgeClass(meta.risk)} text-[10px] px-1 py-0`}>
+                                        {meta.riskLabel}
+                                      </Badge>
+                                    </div>
+                                    <p className="mt-1 max-w-xl text-[11px] text-slate-400">{meta.note}</p>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -791,6 +1017,67 @@ const AccountManagement: React.FC = () => {
         </div>
       )}
 
+      {/* 修改账号信息弹窗 */}
+      {showEditUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-600">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">修改账号信息 - {showEditUser.originalUsername}</h3>
+              <button onClick={() => setShowEditUser(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">用户名 *</label>
+                <Input
+                  value={showEditUser.username}
+                  onChange={e => setShowEditUser({ ...showEditUser, username: e.target.value })}
+                  className="bg-slate-700 border-slate-600 text-white"
+                  placeholder="请输入用户名"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">邮箱</label>
+                <Input
+                  value={showEditUser.email}
+                  onChange={e => setShowEditUser({ ...showEditUser, email: e.target.value })}
+                  className="bg-slate-700 border-slate-600 text-white"
+                  placeholder="请输入邮箱（可选）"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">所属部门（可多选）</label>
+                <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                  {departments.map(dept => (
+                    <button
+                      key={dept.id}
+                      onClick={() => {
+                        const departmentIds = showEditUser.departmentIds.includes(dept.id)
+                          ? showEditUser.departmentIds.filter(id => id !== dept.id)
+                          : [...showEditUser.departmentIds, dept.id];
+                        setShowEditUser({ ...showEditUser, departmentIds });
+                      }}
+                      className={`px-3 py-1 rounded text-sm border ${
+                        showEditUser.departmentIds.includes(dept.id)
+                          ? 'bg-blue-100 border-blue-300 text-slate-900'
+                          : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      {dept.deptName}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <Button onClick={handleUpdateUser} className="w-full bg-blue-600 hover:bg-blue-700">
+                <Save className="w-4 h-4 mr-2" />
+                保存修改
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 修改角色弹窗 */}
       {showRoleModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -838,44 +1125,185 @@ const AccountManagement: React.FC = () => {
           <div className="bg-slate-800 rounded-lg p-6 w-full max-w-2xl border border-slate-600 max-h-[80vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold">编辑权限 - {showPermissionModal.name.replace('ROLE_', '')}</h3>
-              <button onClick={() => setShowPermissionModal(null)} className="text-slate-400 hover:text-white">
+              <button onClick={closePermissionModal} className="text-slate-400 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="space-y-3">
-              <p className="text-sm text-slate-400 mb-2">勾选需要分配给该角色的权限：</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {permissions.map(perm => (
-                  <label
-                    key={perm.name}
-                      className={`flex items-center gap-3 p-3 rounded border cursor-pointer transition ${
-                      selectedPermissions.includes(perm.name)
-                          ? 'bg-blue-100 border-blue-300 text-slate-900'
-                          : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedPermissions.includes(perm.name)}
-                      onChange={() => {
-                        setSelectedPermissions(prev =>
-                          prev.includes(perm.name)
-                            ? prev.filter(p => p !== perm.name)
-                            : [...prev, perm.name]
-                        );
-                      }}
-                      className="w-4 h-4 accent-blue-600"
-                    />
-                      <div>
-                        <p className="text-sm font-medium">{perm.name}</p>
-                        <p className="text-xs text-slate-500">{perm.description}</p>
+              <div className="rounded-md border border-amber-700/60 bg-amber-950/30 p-3 text-sm text-amber-100">
+                <p className="font-medium">安全提示</p>
+                <p className="mt-1 text-xs text-amber-200/90">
+                  当前保存会覆盖该权限组的全部权限。高风险、流程关键、弱生效权限请结合业务测试确认后再调整。
+                </p>
+              </div>
+              <p className="text-sm text-slate-400 mb-2">按模块勾选需要分配给该角色的权限：</p>
+              <div className="space-y-4">
+                {groupPermissionsByModule(permissions).map(([moduleName, modulePermissions]) => (
+                  <div key={moduleName} className="rounded-lg border border-slate-600 bg-slate-900/50 p-3">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <h4 className="text-sm font-semibold text-slate-100">{moduleName}</h4>
+                      <Badge variant="outline" className="bg-slate-700 text-slate-300 border-slate-600 text-xs">
+                        {modulePermissions.filter(perm => selectedPermissions.includes(perm.name)).length}/{modulePermissions.length}
+                      </Badge>
                     </div>
-                  </label>
+                    <div className="grid grid-cols-1 gap-2">
+                      {modulePermissions.map(perm => {
+                        const meta = getPermissionMeta(perm.name);
+                        const checked = selectedPermissions.includes(perm.name);
+                        return (
+                          <label
+                            key={perm.name}
+                            className={`flex items-start gap-3 p-3 rounded border cursor-pointer transition ${
+                              checked
+                                ? 'bg-blue-100 border-blue-300 text-slate-900'
+                                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setSelectedPermissions(prev =>
+                                  prev.includes(perm.name)
+                                    ? prev.filter(p => p !== perm.name)
+                                    : [...prev, perm.name]
+                                );
+                              }}
+                              className="mt-1 w-4 h-4 accent-blue-600"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-medium break-all">{perm.name}</p>
+                                <Badge variant="outline" className={`${getRiskBadgeClass(meta.risk)} text-[10px] px-1.5 py-0`}>
+                                  {meta.riskLabel}
+                                </Badge>
+                              </div>
+                              <p className="mt-1 text-xs text-slate-500">{perm.description}</p>
+                              <p className="mt-1 text-xs text-slate-500">{meta.note}</p>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
                 ))}
               </div>
-              <Button onClick={handleUpdatePermissions} className="w-full bg-blue-600 hover:bg-blue-700 mt-4">
+              <Button onClick={handlePreviewPermissionChanges} className="w-full bg-blue-600 hover:bg-blue-700 mt-4">
                 <Save className="w-4 h-4 mr-2" />
-                保存权限设置
+                预览变更并保存
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 权限变更 Diff 确认弹窗 */}
+      {showPermissionModal && permissionChangePreview && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
+          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-3xl border border-slate-600 max-h-[82vh] overflow-y-auto shadow-2xl">
+            <div className="flex justify-between items-start gap-4 mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-100">
+                  确认权限变更 - {showPermissionModal.name.replace('ROLE_', '')}
+                </h3>
+                <p className="mt-1 text-sm text-slate-400">
+                  请确认以下新增和移除权限。确认后会覆盖该权限组的全部权限配置。
+                </p>
+              </div>
+              <button onClick={() => setPermissionChangePreview(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-lg border border-green-700/60 bg-green-950/20 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h4 className="font-semibold text-green-200">新增权限</h4>
+                  <Badge variant="outline" className="bg-green-100 text-green-700 border-green-300 text-xs">
+                    +{permissionChangePreview.added.length}
+                  </Badge>
+                </div>
+                {permissionChangePreview.added.length === 0 ? (
+                  <p className="text-sm text-slate-500">无新增权限</p>
+                ) : (
+                  <div className="space-y-3">
+                    {groupPermissionsByModule(permissionChangePreview.added).map(([moduleName, modulePermissions]) => (
+                      <div key={moduleName}>
+                        <p className="mb-2 text-xs font-medium text-slate-300">{moduleName}</p>
+                        <div className="space-y-2">
+                          {modulePermissions.map(perm => {
+                            const meta = getPermissionMeta(perm.name);
+                            return (
+                              <div key={perm.name} className="rounded border border-slate-700 bg-slate-900/70 p-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-sm font-medium text-slate-100 break-all">{perm.name}</span>
+                                  <Badge variant="outline" className={`${getRiskBadgeClass(meta.risk)} text-[10px] px-1.5 py-0`}>
+                                    {meta.riskLabel}
+                                  </Badge>
+                                </div>
+                                <p className="mt-1 text-xs text-slate-400">{meta.note}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-red-700/60 bg-red-950/20 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h4 className="font-semibold text-red-200">移除权限</h4>
+                  <Badge variant="outline" className="bg-red-100 text-red-700 border-red-300 text-xs">
+                    -{permissionChangePreview.removed.length}
+                  </Badge>
+                </div>
+                {permissionChangePreview.removed.length === 0 ? (
+                  <p className="text-sm text-slate-500">无移除权限</p>
+                ) : (
+                  <div className="space-y-3">
+                    {groupPermissionsByModule(permissionChangePreview.removed).map(([moduleName, modulePermissions]) => (
+                      <div key={moduleName}>
+                        <p className="mb-2 text-xs font-medium text-slate-300">{moduleName}</p>
+                        <div className="space-y-2">
+                          {modulePermissions.map(perm => {
+                            const meta = getPermissionMeta(perm.name);
+                            return (
+                              <div key={perm.name} className="rounded border border-slate-700 bg-slate-900/70 p-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-sm font-medium text-slate-100 break-all">{perm.name}</span>
+                                  <Badge variant="outline" className={`${getRiskBadgeClass(meta.risk)} text-[10px] px-1.5 py-0`}>
+                                    {meta.riskLabel}
+                                  </Badge>
+                                </div>
+                                <p className="mt-1 text-xs text-slate-400">{meta.note}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-md border border-amber-700/60 bg-amber-950/30 p-3 text-xs text-amber-100">
+              如果移除了“高风险”或“流程关键”权限，可能导致按钮仍可见但业务流程失败、审批任务无法分配或关键操作被拒绝。
+            </div>
+
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setPermissionChangePreview(null)}
+                className="border-slate-600 text-slate-300 hover:bg-slate-700"
+              >
+                返回继续修改
+              </Button>
+              <Button onClick={handleUpdatePermissions} className="bg-blue-600 hover:bg-blue-700">
+                <Save className="w-4 h-4 mr-2" />
+                确认保存变更
               </Button>
             </div>
           </div>

@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS notification (
   title VARCHAR(256) NOT NULL COMMENT '通知标题',
   content TEXT COMMENT '通知内容',
   project_id BIGINT COMMENT '关联项目ID',
-  milestone_code VARCHAR(8) COMMENT '关联里程碑代码',
+  milestone_code VARCHAR(64) COMMENT '关联里程碑代码/流程节点编码',
   related_user_id BIGINT COMMENT '关联操作人ID',
   is_read TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否已读',
   is_todo TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否作为待办持久展示',
@@ -25,5 +25,8 @@ ALTER TABLE notification
 
 ALTER TABLE notification
   ADD COLUMN IF NOT EXISTS is_done TINYINT(1) NOT NULL DEFAULT 0 COMMENT '待办是否已完成';
+
+ALTER TABLE notification
+  MODIFY COLUMN milestone_code VARCHAR(64) COMMENT '关联里程碑代码/流程节点编码';
 
 CREATE INDEX idx_recipient_todo ON notification (recipient_user_id, is_todo, is_done);

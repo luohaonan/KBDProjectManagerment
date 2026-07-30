@@ -4,8 +4,10 @@ import com.kbd.pms.dto.DeliverableUploadRequest;
 import com.kbd.pms.entity.DocumentEntity;
 import com.kbd.pms.service.FileStorageService;
 import com.kbd.pms.service.MilestoneDeliverableService;
+import com.kbd.pms.service.SecurityHelper;
 import jakarta.validation.Valid;
 import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -27,12 +30,15 @@ public class MilestoneDeliverableController {
 
   private final MilestoneDeliverableService deliverableService;
   private final FileStorageService fileStorageService;
+  private final SecurityHelper securityHelper;
 
   public MilestoneDeliverableController(
       MilestoneDeliverableService deliverableService,
-      FileStorageService fileStorageService) {
+      FileStorageService fileStorageService,
+      SecurityHelper securityHelper) {
     this.deliverableService = deliverableService;
     this.fileStorageService = fileStorageService;
+    this.securityHelper = securityHelper;
   }
 
   /**
@@ -45,6 +51,19 @@ public class MilestoneDeliverableController {
     List<MilestoneDeliverableService.DeliverableSlotVO> slots =
         deliverableService.getDeliverableSlots(projectId, milestoneCode);
     return Result.ok(slots);
+  }
+
+  /** 项目详情交付物管理：跨全部 G0-G9 阶段返回当前用户可见的文件。 */
+  @GetMapping("/project/{projectId}")
+  public Result<List<DocumentEntity>> getProjectDeliverables(@PathVariable Long projectId) {
+    return Result.ok(deliverableService.getVisibleDocuments(projectId));
+  }
+
+  /** 项目详情交付物管理：跨 G0-G9 返回固定槽位分组，包含空槽位占位。 */
+  @GetMapping("/project/{projectId}/slots")
+  public Result<List<MilestoneDeliverableService.MilestoneDeliverableGroupVO>> getProjectDeliverableSlots(
+      @PathVariable Long projectId) {
+    return Result.ok(deliverableService.getProjectDeliverableSlotGroups(projectId));
   }
 
   /**
@@ -64,6 +83,16 @@ public class MilestoneDeliverableController {
     return Result.ok(doc);
   }
 
+  @PostMapping("/import")
+  public Result<DocumentEntity> importDeliverable(
+      @RequestParam("file") MultipartFile file,
+      @RequestParam("projectId") Long projectId,
+      @RequestParam("milestoneCode") String milestoneCode,
+      @RequestParam("slotCode") String slotCode,
+      @RequestParam(value = "fileType", required = false) String fileType) throws IOException {
+    return Result.ok(deliverableService.importDeliverable(file, projectId, milestoneCode, slotCode, fileType));
+  }
+
   /**
    * 删除交付物
    */
@@ -79,13 +108,46 @@ public class MilestoneDeliverableController {
   @GetMapping("/{documentId}/download")
   public ResponseEntity<Resource> downloadDeliverable(@PathVariable Long documentId) throws IOException {
     DocumentEntity doc = deliverableService.getDocumentById(documentId);
+    deliverableService.assertCanView(doc);
 
     Resource resource = fileStorageService.loadFileAsResource(doc.getStoragePath());
     MediaType mediaType = MediaType.APPLICATION_OCTET_STREAM;
     return ResponseEntity.ok()
         .contentType(mediaType)
         .header(HttpHeaders.CONTENT_DISPOSITION,
-            "attachment; filename=\"" + doc.getFileName() + "\"")
+            ContentDisposition.attachment().filename(doc.getFileName(), StandardCharsets.UTF_8).build().toString())
+        .body(resource);
+  }
+
+  /**
+   * 预览交付物文件
+   */
+  @GetMapping("/{documentId}/preview")
+  public ResponseEntity<Resource> previewDeliverable(@PathVariable Long documentId) throws IOException {
+    DocumentEntity doc = deliverableService.getDocumentById(documentId);
+    deliverableService.assertCanView(doc);
+
+    Resource resource = fileStorageService.loadFileAsResource(doc.getStoragePath());
+    String fileName = doc.getFileName().toLowerCase();
+    MediaType mediaType;
+    if (fileName.endsWith(".pdf")) {
+      mediaType = MediaType.APPLICATION_PDF;
+    } else if (fileName.endsWith(".png")) {
+      mediaType = MediaType.IMAGE_PNG;
+    } else if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) {
+      mediaType = MediaType.IMAGE_JPEG;
+    } else if (fileName.endsWith(".gif")) {
+      mediaType = MediaType.IMAGE_GIF;
+    } else if (fileName.endsWith(".txt") || fileName.endsWith(".csv") || fileName.endsWith(".log")) {
+      mediaType = MediaType.TEXT_PLAIN;
+    } else {
+      mediaType = MediaType.APPLICATION_OCTET_STREAM;
+    }
+
+    return ResponseEntity.ok()
+        .contentType(mediaType)
+        .header(HttpHeaders.CONTENT_DISPOSITION,
+            ContentDisposition.inline().filename(doc.getFileName(), StandardCharsets.UTF_8).build().toString())
         .body(resource);
   }
 }

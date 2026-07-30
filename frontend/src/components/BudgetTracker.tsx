@@ -1,20 +1,35 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
 import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from 'recharts';
-import { ExpenseEntryForm } from './ExpenseEntryForm';
-import { Plus, AlertTriangle } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
+import api from '../lib/api';
+import { toast } from 'sonner';
+import { EXPENSE_CATEGORY_OPTIONS } from '../constants/expenseCategories';
 
-interface BudgetData {
-  internalCost: number;
-  externalCost: number;
+interface BudgetLedgerItem {
+  id: number;
+  occurredOn: string;
+  expenseCategory: string;
+  amount: number;
+  vendorName: string | null;
+  referenceNo: string | null;
+  description: string | null;
+}
+
+interface BudgetTrackerData {
   totalBudget: number;
+  totalSpent: number;
+  remainingBudget: number;
+  utilizationRatio: number;
+  warningLevel: string;
+  warningThresholdPercent: number;
+  ledgerItems: BudgetLedgerItem[];
 }
 
 interface BudgetTrackerProps {
-  data: BudgetData;
   projectName?: string;
-  projectId?: number;
+  projectId: number;
+  refreshKey?: number;
 }
 
 const COLORS = {
@@ -23,43 +38,60 @@ const COLORS = {
 };
 
 export const BudgetTracker: React.FC<BudgetTrackerProps> = ({
-  data,
   projectName = '项目',
-  projectId = 1,
+  projectId,
+  refreshKey = 0,
 }) => {
-  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [data, setData] = useState<BudgetTrackerData | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const spent = data.internalCost + data.externalCost;
-  const remaining = Math.max(0, data.totalBudget - spent);
-  const spentPercent = ((spent / data.totalBudget) * 100).toFixed(1);
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setLoading(true);
+        const res = await api.get(`/api/budgets/projects/${projectId}/management`);
+        setData(res.data.data);
+      } catch (error: any) {
+        toast.error(error.response?.data?.message || '加载预算追踪数据失败');
+      } finally {
+        setLoading(false);
+      }
+    };
+    void loadData();
+  }, [projectId, refreshKey]);
+
+  const spent = data?.totalSpent ?? 0;
+  const remaining = data?.remainingBudget ?? 0;
+  const totalBudget = data?.totalBudget ?? 0;
+  const spentPercent = totalBudget > 0 ? (data?.utilizationRatio ?? 0).toFixed(1) : '0.0';
 
   const chartData = [
     { name: '已支出', value: spent, color: COLORS.spent },
     { name: '剩余预算', value: remaining, color: COLORS.remaining },
   ];
 
-  // 内部费用和外部费用的对比数据
-  const costBreakdownData = [
-    {
-      name: '内部研发费用',
-      value: data.internalCost,
-    },
-    {
-      name: '外部费用',
-      value: data.externalCost,
-    },
-  ];
-  
-  const BREAKDOWN_COLORS = ['#3b82f6', '#a855f7'];
+  const costBreakdownData = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const option of EXPENSE_CATEGORY_OPTIONS) {
+      totals.set(option.value, 0);
+    }
+    for (const item of data?.ledgerItems || []) {
+      totals.set(item.expenseCategory, (totals.get(item.expenseCategory) || 0) + (item.amount || 0));
+    }
+    return EXPENSE_CATEGORY_OPTIONS
+      .map((option) => ({
+        name: option.label,
+        value: totals.get(option.value) || 0,
+        description: option.description,
+      }))
+      .filter((item) => item.value > 0 || !(data?.ledgerItems?.length));
+  }, [data]);
 
-  const handleExpenseSubmit = (expenseData: any) => {
-    console.log('录入支出：', expenseData);
-    alert('支出已录入！');
-    setShowExpenseForm(false);
-  };
+  const BREAKDOWN_COLORS = ['#3b82f6', '#a855f7', '#14b8a6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
   const getBudgetAlert = () => {
-    const percent = (spent / data.totalBudget) * 100;
+    const percent = data?.utilizationRatio ?? 0;
+    const warningThreshold = data?.warningThresholdPercent ?? 80;
     if (percent > 95) {
       return {
         level: 'critical',
@@ -67,10 +99,10 @@ export const BudgetTracker: React.FC<BudgetTrackerProps> = ({
         color: 'text-red-500',
         bgColor: 'bg-red-900/20',
       };
-    } else if (percent > 80) {
+    } else if (percent > warningThreshold) {
       return {
         level: 'warning',
-        message: '预算使用率超过80%，请注意控制支出。',
+        message: `预算使用率超过${warningThreshold}%，请注意控制支出。`,
         color: 'text-yellow-500',
         bgColor: 'bg-yellow-900/20',
       };
@@ -79,6 +111,14 @@ export const BudgetTracker: React.FC<BudgetTrackerProps> = ({
   };
 
   const budgetAlert = getBudgetAlert();
+
+  if (loading) {
+    return <Card className="bg-slate-800 border-slate-600"><CardContent className="py-6 text-slate-300">预算追踪加载中...</CardContent></Card>;
+  }
+
+  if (!data) {
+    return null;
+  }
 
   return (
     <div className="space-y-6">
@@ -129,7 +169,7 @@ export const BudgetTracker: React.FC<BudgetTrackerProps> = ({
               <div className="p-4 bg-slate-700 rounded">
                 <p className="text-slate-400 text-sm mb-1">总预算</p>
                 <p className="text-2xl font-bold text-slate-100">
-                  ¥{(data.totalBudget / 10000).toFixed(2)}万
+                  ¥{(totalBudget / 10000).toFixed(2)}万
                 </p>
               </div>
 
@@ -161,7 +201,7 @@ export const BudgetTracker: React.FC<BudgetTrackerProps> = ({
                     {budgetAlert.level === 'critical' ? '⚠️ 严重预警' : '⚠️ 预算预警'}
                   </p>
                   <p className="text-slate-300 text-xs mt-1">
-                    {budgetAlert.level === 'critical'
+                    当前预警阈值 {data.warningThresholdPercent?.toFixed(1) || '80.0'}% / {budgetAlert.level === 'critical'
                       ? '预算使用率已超过95%，需立即联系 PMC 申请追加预算'
                       : '预算使用率已超过80%，请留意预算动向'}
                   </p>
@@ -215,43 +255,27 @@ export const BudgetTracker: React.FC<BudgetTrackerProps> = ({
 
             {/* 费用明细 */}
             <div className="space-y-4">
-              {/* 内部研发费用 */}
-              <div className="p-4 bg-slate-700 rounded border border-blue-600/30">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded bg-blue-500" />
-                    <p className="text-slate-300 font-medium">内部研发费用</p>
+              {costBreakdownData.length === 0 ? (
+                <div className="p-4 bg-slate-700 rounded text-sm text-slate-400">暂无费用分类数据</div>
+              ) : costBreakdownData.map((item, index) => (
+                <div key={item.name} className="p-4 bg-slate-700 rounded border" style={{ borderColor: `${BREAKDOWN_COLORS[index]}55` }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded" style={{ backgroundColor: BREAKDOWN_COLORS[index] }} />
+                      <p className="text-slate-300 font-medium">{item.name}</p>
+                    </div>
+                    <span className="text-xs text-slate-400">
+                      {spent > 0 ? `${((item.value / spent) * 100).toFixed(1)}%` : '0.0%'}
+                    </span>
                   </div>
-                  <span className="text-xs text-slate-400">
-                    {((data.internalCost / spent) * 100).toFixed(1)}%
-                  </span>
+                  <p className="text-xl font-bold text-slate-100">
+                    ¥{(item.value / 10000).toFixed(2)}万
+                  </p>
+                  <p className="text-xs text-slate-400 mt-2">
+                    {item.description || '—'}
+                  </p>
                 </div>
-                <p className="text-xl font-bold text-slate-100">
-                  ¥{(data.internalCost / 10000).toFixed(2)}万
-                </p>
-                <p className="text-xs text-slate-400 mt-2">
-                  包括：人力、实验耗材、设备折旧等
-                </p>
-              </div>
-
-              {/* 外部费用 */}
-              <div className="p-4 bg-slate-700 rounded border border-purple-600/30">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded bg-purple-500" />
-                    <p className="text-slate-300 font-medium">外部费用</p>
-                  </div>
-                  <span className="text-xs text-slate-400">
-                    {((data.externalCost / spent) * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <p className="text-xl font-bold text-slate-100">
-                  ¥{(data.externalCost / 10000).toFixed(2)}万
-                </p>
-                <p className="text-xs text-slate-400 mt-2">
-                  包括：CRO/CDMO、临床中心、第三方服务、注册费用等
-                </p>
-              </div>
+              ))}
             </div>
           </div>
         </CardContent>
@@ -272,25 +296,6 @@ export const BudgetTracker: React.FC<BudgetTrackerProps> = ({
         </Card>
       )}
 
-      {/* 支出录入 */}
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-semibold text-slate-100">支出管理</h3>
-        <Button
-          onClick={() => setShowExpenseForm(!showExpenseForm)}
-          className="bg-blue-600 hover:bg-blue-700"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          {showExpenseForm ? '取消录入' : '录入支出'}
-        </Button>
-      </div>
-
-      {showExpenseForm && (
-        <ExpenseEntryForm
-          projectId={projectId}
-          onSubmit={handleExpenseSubmit}
-          onCancel={() => setShowExpenseForm(false)}
-        />
-      )}
     </div>
   );
 };

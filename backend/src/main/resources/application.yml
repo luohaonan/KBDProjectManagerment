@@ -17,6 +17,10 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
   jackson:
     time-zone: UTC
 
@@ -26,11 +30,14 @@ jwt:
 
 logging:
   level:
-    org.hibernate.SQL: debug
+    org.hibernate.SQL: warn
+    org.hibernate.orm.jdbc.bind: warn
     org.springframework.security: info
     # 减少框架内部 DEBUG 日志刷屏
     org.springframework.web: warn
     org.springframework.boot: warn
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} : %msg%n"
+
+
 
