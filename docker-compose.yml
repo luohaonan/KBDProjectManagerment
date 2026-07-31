@@ -1,0 +1,80 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: kbd-pms-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-kbd_pm_system}
+      MYSQL_USER: ${DB_USER:-kbd_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    volumes:
+      - kbd-pms-mysql-data:/var/lib/mysql
+      - ./deploy/db/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "33077:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks:
+      - kbd-pms-net
+
+  backend:
+    image: ${DOCKER_IMAGE_PREFIX:-kbd-pms}/backend:${IMAGE_TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: kbd-pms-backend
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: 8080
+      APP_FILE_STORAGE_ROOT: /app/uploads
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-kbd_pm_system}
+      DB_USER: ${DB_USER:-kbd_user}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      TZ: Asia/Shanghai
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - kbd-pms-uploads:/app/uploads
+    ports:
+      - "18081:8080"
+    networks:
+      - kbd-pms-net
+
+  frontend:
+    image: ${DOCKER_IMAGE_PREFIX:-kbd-pms}/frontend:${IMAGE_TAG:-latest}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    container_name: kbd-pms-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "18080:80"
+    networks:
+      - kbd-pms-net
+
+volumes:
+  kbd-pms-mysql-data:
+  kbd-pms-uploads:
+
+networks:
+  kbd-pms-net:
+    driver: bridge

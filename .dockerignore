@@ -1,0 +1,39 @@
+# Git / IDE
+.git
+.gitignore
+.vscode
+.idea
+*.iml
+
+# Local dependencies and build outputs
+**/node_modules
+**/dist
+**/target
+**/bin
+**/KBDProjectManagerment.worktrees
+
+# Unnecessary planning / analysis files
+plans
+*.docx
+policy_extracted.md
+*_report.py
+extract_*.py
+parse_*.py
+check_*.py
+
+# Runtime secrets / database dumps / archives
+.env
+.env.*
+!.env.server.example
+deploy/private
+deploy/db/init/*.sql
+deploy/db/init/*.sql.gz
+*.zip
+*.7z
+*.tar
+*.tar.gz
+
+# Logs / OS
+*.log
+.DS_Store
+Thumbs.db

@@ -12,6 +12,9 @@ import java.util.Map;
 @Service
 public class SystemConfigService {
 
+  private static final String DEFAULT_INTERNAL_URL = "http://192.168.39.233:18080/";
+  private static final String DEFAULT_EXTERNAL_URL = "http://343t787f48.wicp.vip/";
+
   private final SystemConfigRepository configRepository;
 
   public SystemConfigService(SystemConfigRepository configRepository) {
@@ -26,22 +29,34 @@ public class SystemConfigService {
         .orElse(null);
   }
 
-  /** 获取所有邮件配置（密码脱敏） */
+  /** 获取邮件配置和通知邮件访问地址（密码脱敏） */
   @Transactional(readOnly = true)
   public Map<String, String> getMailConfig() {
     Map<String, String> result = new LinkedHashMap<>();
     String[] keys = {
         "mail.smtp.host", "mail.smtp.port", "mail.smtp.username",
-        "mail.smtp.password", "mail.smtp.ssl", "mail.from.address", "mail.enabled"
+        "mail.smtp.password", "mail.smtp.ssl", "mail.from.address", "mail.enabled",
+        "app.internal.url", "app.external.url"
     };
     for (String key : keys) {
       String value = getConfig(key);
       if ("mail.smtp.password".equals(key) && value != null && !value.isEmpty()) {
         value = "****";
       }
+      if ("app.internal.url".equals(key) && isBlank(value)) {
+        value = DEFAULT_INTERNAL_URL;
+      }
+      if ("app.external.url".equals(key) && isBlank(value)) {
+        String legacyUrl = getConfig("app.base.url");
+        value = isBlank(legacyUrl) ? DEFAULT_EXTERNAL_URL : legacyUrl.trim();
+      }
       result.put(key, value != null ? value : "");
     }
     return result;
+  }
+
+  private boolean isBlank(String value) {
+    return value == null || value.trim().isEmpty();
   }
 
   /** 批量保存邮件配置（密码为 "****" 时保留原值） */

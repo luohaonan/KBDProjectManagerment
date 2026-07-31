@@ -8,7 +8,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:kbd_pm_system}?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&useSSL=false&allowPublicKeyRetrieval=true
     username: ${DB_USER:root}
-    password: ${DB_PASSWORD:baiyu@2025}
+    password: ${DB_PASSWORD:}
   jpa:
     open-in-view: false
     hibernate:
@@ -25,7 +25,7 @@ spring:
     time-zone: UTC
 
 jwt:
-  secret: ${JWT_SECRET:mySecretKeyForJwtTokenGeneration}
+  secret: ${JWT_SECRET:change-me-in-env-file}
   expiration: ${JWT_EXPIRATION:86400000}
 
 logging:
@@ -38,6 +38,7 @@ logging:
     org.springframework.boot: warn
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} : %msg%n"
+
 
 
 

@@ -23,9 +23,12 @@
             <td style="padding:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
               <p style="font-size:14px;color:#334155;line-height:1.6;margin:0 0 16px 0;" th:utext="${content}"></p>
               <hr style="border:0;border-top:1px solid #e2e8f0;margin:24px 0;">
-              <p style="font-size:12px;color:#94a3b8;margin:0;">
-                请登录系统查看详情：
-                <a th:href="${loginUrl}" style="color:#3b82f6;text-decoration:none;" th:text="${loginUrl}">http://localhost:5173</a>
+              <p style="font-size:12px;color:#94a3b8;line-height:1.8;margin:0;">
+                请根据所在网络选择访问地址：<br>
+                内网地址：
+                <a th:href="${internalLoginUrl}" style="color:#3b82f6;text-decoration:none;" th:text="${internalLoginUrl}">http://192.168.39.233:18080/</a><br>
+                外网地址：
+                <a th:href="${externalLoginUrl}" style="color:#3b82f6;text-decoration:none;" th:text="${externalLoginUrl}">http://343t787f48.wicp.vip/</a>
               </p>
             </td>
           </tr>

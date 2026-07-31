@@ -167,6 +167,7 @@ interface EditUserForm {
   originalUsername: string;
   username: string;
   email: string;
+  roles: string[];
   departmentIds: number[];
 }
 
@@ -279,6 +280,7 @@ const AccountManagement: React.FC = () => {
       await api.put(`/api/users/${showEditUser.userId}`, {
         username: showEditUser.username.trim(),
         email: showEditUser.email.trim(),
+        roles: showEditUser.roles,
         departmentIds: showEditUser.departmentIds,
       });
       toast.success('账号信息更新成功');
@@ -361,6 +363,7 @@ const AccountManagement: React.FC = () => {
       originalUsername: u.username,
       username: u.username,
       email: u.email || '',
+      roles: u.roles || [],
       departmentIds: u.departmentIds || [],
     });
   };
@@ -1045,6 +1048,30 @@ const AccountManagement: React.FC = () => {
                   className="bg-slate-700 border-slate-600 text-white"
                   placeholder="请输入邮箱（可选）"
                 />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">角色（可多选）</label>
+                <div className="flex flex-wrap gap-2">
+                  {roles.map(role => (
+                    <button
+                      key={role.name}
+                      type="button"
+                      onClick={() => {
+                        const nextRoles = showEditUser.roles.includes(role.name)
+                          ? showEditUser.roles.filter(r => r !== role.name)
+                          : [...showEditUser.roles, role.name];
+                        setShowEditUser({ ...showEditUser, roles: nextRoles });
+                      }}
+                      className={`px-3 py-1 rounded text-sm border ${
+                        showEditUser.roles.includes(role.name)
+                          ? selectableTagActiveClass
+                          : selectableTagClass
+                      }`}
+                    >
+                      {role.name.replace('ROLE_', '')}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-2">所属部门（可多选）</label>

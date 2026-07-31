@@ -17,6 +17,8 @@ import java.util.Properties;
 public class EmailService {
 
   private static final Logger log = LoggerFactory.getLogger(EmailService.class);
+  private static final String DEFAULT_INTERNAL_URL = "http://192.168.39.233:18080/";
+  private static final String DEFAULT_EXTERNAL_URL = "http://343t787f48.wicp.vip/";
 
   private final SystemConfigService configService;
   private final TemplateEngine templateEngine;
@@ -36,12 +38,27 @@ public class EmailService {
     Context context = new Context(Locale.getDefault());
     context.setVariable("subject", subject);
     context.setVariable("content", content);
-    context.setVariable("loginUrl", configService.getConfig("app.base.url") != null
-        ? configService.getConfig("app.base.url")
-        : "http://localhost:5173");
+    String internalUrl = firstNonBlank(configService.getConfig("app.internal.url"), DEFAULT_INTERNAL_URL);
+    String externalUrl = firstNonBlank(
+        configService.getConfig("app.external.url"),
+        configService.getConfig("app.base.url"),
+        DEFAULT_EXTERNAL_URL);
+    context.setVariable("internalLoginUrl", internalUrl);
+    context.setVariable("externalLoginUrl", externalUrl);
+    // Keep the legacy variable available for compatibility with older templates.
+    context.setVariable("loginUrl", externalUrl);
     String htmlContent = templateEngine.process("email/notification", context);
 
     sendRawEmail(to, subject, htmlContent);
+  }
+
+  private String firstNonBlank(String... values) {
+    for (String value : values) {
+      if (value != null && !value.trim().isEmpty()) {
+        return value.trim();
+      }
+    }
+    return "";
   }
 
   /**

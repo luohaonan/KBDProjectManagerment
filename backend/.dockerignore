@@ -1,0 +1,6 @@
+target
+bin
+KBDProjectManagerment.worktrees
+.classpath
+.project
+*.log

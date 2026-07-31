@@ -129,6 +129,10 @@ public class UserController {
         user.setUsername(normalizedUsername);
         user.setEmail(normalizedEmail);
 
+        if (request.getRoles() != null) {
+            user.setRoles(resolveRoles(request.getRoles()));
+        }
+
         Set<OrgDepartmentEntity> departments = new HashSet<>();
         if (request.getDepartmentIds() != null) {
             for (Long deptId : request.getDepartmentIds()) {
@@ -215,17 +219,27 @@ public class UserController {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ApiException(404, "用户不存在"));
 
-        Set<Role> roles = new HashSet<>();
-        for (String roleName : request.getRoles()) {
-            Role role = roleRepository.findByName(roleName)
-                    .orElseThrow(() -> new ApiException(400, "角色不存在: " + roleName));
-            roles.add(role);
-        }
-        user.setRoles(roles);
+        user.setRoles(resolveRoles(request.getRoles()));
         user.setUpdatedAt(Instant.now());
         user = userRepository.save(user);
 
         return ResponseEntity.ok(Result.ok(UserDto.fromEntity(user)));
+    }
+
+    private Set<Role> resolveRoles(List<String> roleNames) {
+        Set<Role> roles = new HashSet<>();
+        if (roleNames == null) {
+            return roles;
+        }
+        for (String roleName : roleNames) {
+            if (roleName == null || roleName.trim().isEmpty()) {
+                continue;
+            }
+            Role role = roleRepository.findByName(roleName.trim())
+                    .orElseThrow(() -> new ApiException(400, "角色不存在: " + roleName));
+            roles.add(role);
+        }
+        return roles;
     }
 
     /**
@@ -422,12 +436,15 @@ public class UserController {
     public static class UpdateUserRequest {
         private String username;
         private String email;
+        private List<String> roles;
         private List<Long> departmentIds;
 
         public String getUsername() { return username; }
         public void setUsername(String username) { this.username = username; }
         public String getEmail() { return email; }
         public void setEmail(String email) { this.email = email; }
+        public List<String> getRoles() { return roles; }
+        public void setRoles(List<String> roles) { this.roles = roles; }
         public List<Long> getDepartmentIds() { return departmentIds; }
         public void setDepartmentIds(List<Long> departmentIds) { this.departmentIds = departmentIds; }
     }

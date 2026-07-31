@@ -17,6 +17,8 @@ const fieldLabels: Record<string, string> = {
   'mail.smtp.ssl': '启用 SSL',
   'mail.from.address': '发信人地址',
   'mail.enabled': '启用邮件发送',
+  'app.internal.url': '内网地址（邮件链接）',
+  'app.external.url': '外网地址（邮件链接）',
 };
 
 const fieldPlaceholders: Record<string, string> = {
@@ -25,6 +27,8 @@ const fieldPlaceholders: Record<string, string> = {
   'mail.smtp.username': 'noreply@example.com',
   'mail.smtp.password': '留空则不修改密码',
   'mail.from.address': 'noreply@example.com',
+  'app.internal.url': 'http://192.168.39.233:18080/',
+  'app.external.url': 'http://343t787f48.wicp.vip/',
 };
 
 const isPasswordField = (key: string) => key === 'mail.smtp.password';
@@ -38,6 +42,8 @@ const EmailConfig: React.FC = () => {
     'mail.smtp.ssl': 'true',
     'mail.from.address': '',
     'mail.enabled': 'false',
+    'app.internal.url': 'http://192.168.39.233:18080/',
+    'app.external.url': 'http://343t787f48.wicp.vip/',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -53,7 +59,7 @@ const EmailConfig: React.FC = () => {
     try {
       const res = await api.get('/api/system/config/mail');
       if (res.data.code === 0) {
-        setConfig(res.data.data as MailConfig);
+        setConfig(prev => ({ ...prev, ...(res.data.data as MailConfig) }));
       }
     } catch (err) {
       toast.error('获取邮件配置失败');
@@ -134,6 +140,9 @@ const EmailConfig: React.FC = () => {
             <Settings className="h-5 w-5" />
             SMTP 服务器配置
           </CardTitle>
+          <p className="text-sm text-slate-500">
+            提醒邮件会同时包含内网和外网地址，收件人可根据当前网络选择访问。
+          </p>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">

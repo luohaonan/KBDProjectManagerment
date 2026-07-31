@@ -16,3 +16,14 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Docker deployment secrets / generated packages
+.env.server
+deploy/db/init/*.sql
+deploy/db/init/*.sql.gz
+deploy-package/
+kbd-pms-deploy-package*.zip
+
+# Large local archives / database image exports
+*.tar
+mysql-8.4.tar
