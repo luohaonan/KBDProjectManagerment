@@ -1,6 +1,11 @@
 # Build output
 backend/target/
+backend/bin/
 frontend/node_modules/
+frontend/dist/
+node_modules/
+target/
+dist/
 
 # Graphify analysis output
 graphify-out/
@@ -9,6 +14,10 @@ graphify-out/
 .idea/
 *.iml
 .vscode/
+.classpath
+.project
+backend/.classpath
+backend/.project
 
 # OS
 .DS_Store
@@ -16,9 +25,12 @@ Thumbs.db
 
 # Logs
 *.log
+hs_err_pid*.log
 
 # Docker deployment secrets / generated packages
 .env.server
+.env
+frontend/.env
 deploy/db/init/*.sql
 deploy/db/init/*.sql.gz
 deploy-package/
@@ -27,3 +39,14 @@ kbd-pms-deploy-package*.zip
 # Large local archives / database image exports
 *.tar
 mysql-8.4.tar
+
+# Local analysis / development helper artifacts
+plans/
+policy.docx
+policy_extracted.md
+check_cache.py
+check_metadata.py
+extract_controllers.py
+extract_policy.py
+parse_controllers.py
+search_report.py
