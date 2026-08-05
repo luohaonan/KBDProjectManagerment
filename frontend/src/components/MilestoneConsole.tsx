@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -164,6 +164,7 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
   const [deliverableSlots, setDeliverableSlots] = useState<DeliverableSlot[]>([]);
   const [loadingDeliverables, setLoadingDeliverables] = useState(false);
   const [uploadingSlot, setUploadingSlot] = useState<string | null>(null);
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const [reviews, setReviews] = useState<ReviewApproval[]>([]);
   const [records, setRecords] = useState<ReviewRecord[]>([]);
   const [reviewProgress, setReviewProgress] = useState<ReviewProgressData | null>(null);
@@ -176,6 +177,7 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
   const [decisionLoading, setDecisionLoading] = useState<number | null>(null);
   const [decisionOpinion, setDecisionOpinion] = useState('');
   const isPm = currentUserRoles.includes('ROLE_PM');
+  const isAdministrator = currentUserRoles.includes('ROLE_ADMIN') || currentUserRoles.includes('ROLE_PROJECT_ADMIN');
 
   const milestoneCode = stageName[currentStage];
 
@@ -257,31 +259,34 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
     }
   }, [projectId, milestoneCode]);
 
-  // 上传交付物
-  const handleUpload = async (slotCode: string, file: File) => {
+  // 单一入口支持一次选择多个文件，并逐个追加到槽位文件列表。
+  const uploadFiles = async (slotCode: string, selected?: FileList | null) => {
     if (!projectId) return;
+    const files = Array.from(selected || []);
+    if (files.length === 0) return;
     setUploadingSlot(slotCode);
+    let uploaded = 0;
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('projectId', String(projectId));
-      formData.append('milestoneCode', milestoneCode);
-      formData.append('slotCode', slotCode);
-
-      const res = await api.post('/api/milestone-deliverables/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      const result = res.data as { code: number; data: DeliverableDocument; message?: string };
-      if (result.code === 200 || result.code === 0) {
-        toast.success('上传成功');
-        loadDeliverables();
-      } else {
-        toast.error(result.message || '上传失败');
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('projectId', String(projectId));
+        formData.append('milestoneCode', milestoneCode);
+        formData.append('slotCode', slotCode);
+        await api.post('/api/milestone-deliverables/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        uploaded++;
       }
+      toast.success(`${uploaded} 个文件上传成功`);
+      await loadDeliverables();
     } catch (error: any) {
+      if (uploaded > 0) await loadDeliverables();
       toast.error('上传失败: ' + (error.response?.data?.message || error.message));
     } finally {
       setUploadingSlot(null);
+      const input = fileInputRefs.current[slotCode];
+      if (input) input.value = '';
     }
   };
 
@@ -520,86 +525,96 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
           ) : (
             <div className="space-y-4">
               {deliverableSlots.map(slot => {
-                const hasDoc = slot.documents && slot.documents.length > 0;
-                const doc = hasDoc ? slot.documents[0] : null;
+                const docs = slot.documents || [];
+                const hasDoc = docs.length > 0;
                 const isUploading = uploadingSlot === slot.slotCode;
                 return (
                   <div
                     key={slot.slotCode}
-                    className="flex items-center justify-between p-4 bg-slate-700 rounded border border-slate-600"
+                    className="p-4 bg-slate-700 rounded border border-slate-600"
                   >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-100 font-medium">
-                          {slot.slotName}
-                        </span>
-                        {slot.isRequired && (
-                          <span className="text-red-500 text-sm">必填</span>
-                        )}
-                      </div>
-                      {slot.description && (
-                        <p className="text-sm text-slate-400 mt-1">{slot.description}</p>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      {hasDoc && doc ? (
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center gap-2 text-green-400">
-                            <CheckCircle className="w-4 h-4" />
-                            <span className="text-sm">{doc.fileName}</span>
-                          </div>
-                          <button
-                            className="p-1.5 rounded hover:bg-slate-600 transition text-slate-300 hover:text-white"
-                            title="预览"
-                            onClick={() => handlePreview(doc.id)}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          <button
-                            className="p-1.5 rounded hover:bg-slate-600 transition text-slate-300 hover:text-white"
-                            title="下载"
-                            onClick={() => handleDownload(doc.id, doc.fileName)}
-                          >
-                            <Download className="w-4 h-4" />
-                          </button>
-                          {allowUpload && !doc.isLocked && (
-                            <button
-                              className="p-1.5 rounded hover:bg-red-900/50 transition text-slate-300 hover:text-red-400"
-                              title="删除"
-                              onClick={() => handleDelete(doc.id)}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-100 font-medium">
+                            {slot.slotName}
+                          </span>
+                          {slot.isRequired && (
+                            <span className="text-red-500 text-sm">必填</span>
                           )}
                         </div>
-                      ) : allowUpload ? (
-                        <label className={`flex items-center gap-2 px-3 py-2 bg-slate-600 rounded cursor-pointer hover:bg-slate-500 transition ${isUploading ? 'opacity-50 cursor-wait' : ''}`}>
-                          {isUploading ? (
-                            <Loader2 className="w-4 h-4 text-slate-300 animate-spin" />
-                          ) : (
-                            <FileUp className="w-4 h-4 text-slate-300" />
-                          )}
-                          <span className="text-sm text-slate-300">
-                            {isUploading ? '上传中...' : '上传'}
-                          </span>
-                          <input
-                            type="file"
-                            hidden
-                            disabled={isUploading}
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                handleUpload(slot.slotCode, file);
-                              }
-                            }}
-                            accept={slot.allowedFileTypes || '.pdf,.doc,.docx'}
-                          />
-                        </label>
-                      ) : (
-                        <span className="text-sm text-slate-500">未上传</span>
-                      )}
+                        {slot.description && (
+                          <p className="text-sm text-slate-400 mt-1">{slot.description}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs text-slate-400">已上传 {docs.length} 个</span>
+                        {allowUpload && (
+                          <>
+                            <input
+                              ref={(el) => { fileInputRefs.current[slot.slotCode] = el; }}
+                              type="file"
+                              multiple
+                              accept={slot.allowedFileTypes || '.pdf,.doc,.docx'}
+                              className="hidden"
+                              disabled={isUploading}
+                              onChange={(e) => uploadFiles(slot.slotCode, e.target.files)}
+                            />
+                            <button
+                              onClick={() => fileInputRefs.current[slot.slotCode]?.click()}
+                              disabled={isUploading}
+                              className="flex items-center gap-1 px-2 py-1.5 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-60 transition text-white text-xs"
+                              title="选择一个或多个文件上传"
+                            >
+                              {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileUp className="w-4 h-4" />}
+                              {isUploading ? '上传中...' : '上传文件'}
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
+
+                    {/* 已上传文档列表 */}
+                    {hasDoc ? (
+                      <div className="space-y-2">
+                        {docs.map(doc => (
+                          <div key={doc.id} className="flex items-center justify-between gap-2 rounded bg-slate-800/70 border border-slate-600 px-3 py-2">
+                            <div className="flex items-center gap-2 text-green-400 min-w-0">
+                              <CheckCircle className="w-4 h-4 shrink-0" />
+                              <span className="text-sm truncate">{doc.fileName}</span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                className="p-1.5 rounded hover:bg-slate-600 transition text-slate-300 hover:text-white"
+                                title="预览"
+                                onClick={() => handlePreview(doc.id)}
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                              <button
+                                className="p-1.5 rounded hover:bg-slate-600 transition text-slate-300 hover:text-white"
+                                title="下载"
+                                onClick={() => handleDownload(doc.id, doc.fileName)}
+                              >
+                                <Download className="w-4 h-4" />
+                              </button>
+                              {((allowUpload && !doc.isLocked) || isAdministrator) && (
+                                <button
+                                  className="p-1.5 rounded hover:bg-red-900/50 transition text-slate-300 hover:text-red-400"
+                                  title="删除"
+                                  onClick={() => handleDelete(doc.id)}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-500">未上传</p>
+                    )}
+
                   </div>
                 );
               })}

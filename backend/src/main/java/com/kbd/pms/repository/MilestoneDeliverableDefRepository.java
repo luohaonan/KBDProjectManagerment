@@ -10,5 +10,7 @@ public interface MilestoneDeliverableDefRepository extends JpaRepository<Milesto
 
   List<MilestoneDeliverableDefEntity> findByMilestoneCodeAndIsActiveTrueOrderBySortNoAsc(String milestoneCode);
 
+  List<MilestoneDeliverableDefEntity> findByMilestoneCodeOrderBySortNoAsc(String milestoneCode);
+
   Optional<MilestoneDeliverableDefEntity> findByMilestoneCodeAndSlotCode(String milestoneCode, String slotCode);
 }

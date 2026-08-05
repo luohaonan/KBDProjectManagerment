@@ -95,7 +95,14 @@ New-Item -ItemType Directory -Force -Path (Join-Path $PackageDir "db") | Out-Nul
 Copy-Item docker-compose.yml $PackageDir
 Copy-Item .env.server.example $PackageDir
 Copy-Item DOCKER_DEPLOYMENT_GUIDE.md $PackageDir -ErrorAction SilentlyContinue
-Copy-Item (Join-Path $ProjectRoot "db\20260731_mail_access_urls.sql") (Join-Path $PackageDir "db") -Force
+
+$MailUrlMigration = Join-Path $ProjectRoot "db\20260731_mail_access_urls.sql"
+if (Test-Path $MailUrlMigration) {
+  Copy-Item $MailUrlMigration (Join-Path $PackageDir "db") -Force
+}
+else {
+  Write-Host "==> Optional migration not found, skipping: $MailUrlMigration" -ForegroundColor Yellow
+}
 
 if (Test-Path $DbInitDir) {
   Copy-Item (Join-Path $DbInitDir "*") (Join-Path $PackageDir "deploy\db\init") -Recurse -Force -ErrorAction SilentlyContinue

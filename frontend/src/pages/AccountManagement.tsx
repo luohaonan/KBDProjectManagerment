@@ -7,7 +7,7 @@ import { Badge } from '../components/ui/badge';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 import { toast } from 'sonner';
-import { UserPlus, Key, Shield, ShieldCheck, ArrowLeft, Save, X, Building2, UserCog, Trash2, Edit3 } from 'lucide-react';
+import { UserPlus, Key, Shield, ShieldCheck, ArrowLeft, Save, X, Building2, UserCog, Trash2, Edit3, Plus } from 'lucide-react';
 
 const lightTagClass = 'bg-slate-100 text-slate-700 border-slate-300';
 const lightTagClassXs = 'bg-slate-100 text-slate-700 border-slate-300 text-xs';
@@ -199,6 +199,10 @@ const AccountManagement: React.FC = () => {
   const [selectedAddUserId, setSelectedAddUserId] = useState<number | undefined>(undefined);
   const [showEditDept, setShowEditDept] = useState<DepartmentInfo | null>(null);
   const [editDeptName, setEditDeptName] = useState('');
+  const [showCreateDept, setShowCreateDept] = useState(false);
+  const [newDeptName, setNewDeptName] = useState('');
+  const [newDeptType, setNewDeptType] = useState('PDT');
+  const [creatingDept, setCreatingDept] = useState(false);
 
   // 表单状态
   const [newUser, setNewUser] = useState({ username: '', password: '', email: '', roles: [] as string[], departmentIds: [] as number[] });
@@ -454,6 +458,29 @@ const AccountManagement: React.FC = () => {
     }
   };
 
+  const handleCreateDepartment = async () => {
+    if (!newDeptName.trim()) {
+      toast.error('部门名称不能为空');
+      return;
+    }
+    setCreatingDept(true);
+    try {
+      await api.post('/api/departments', {
+        deptName: newDeptName.trim(),
+        deptType: newDeptType,
+      });
+      toast.success('部门创建成功');
+      setShowCreateDept(false);
+      setNewDeptName('');
+      setNewDeptType('PDT');
+      loadData();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || '创建部门失败');
+    } finally {
+      setCreatingDept(false);
+    }
+  };
+
   const handleUpdateDepartment = async () => {
     if (!showEditDept || !editDeptName.trim()) {
       toast.error('部门名称不能为空');
@@ -699,7 +726,13 @@ const AccountManagement: React.FC = () => {
         {/* 部门管理面板 */}
         {activeTab === 'departments' && isAdmin && (
           <div>
-            <h2 className="text-xl font-semibold mb-4">部门管理</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">部门管理</h2>
+              <Button onClick={() => setShowCreateDept(true)} className="bg-green-600 hover:bg-green-700">
+                <Plus className="w-4 h-4 mr-2" />
+                新建部门
+              </Button>
+            </div>
             <div className="grid gap-4">
               {departments.map(dept => (
                 <Card key={dept.id} className="bg-slate-800 border-slate-600">
@@ -1459,6 +1492,47 @@ const AccountManagement: React.FC = () => {
                 </tbody>
               </table>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 新建部门弹窗 */}
+      {showCreateDept && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-600">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold"><Building2 className="w-5 h-5 text-blue-400 inline mr-2" />新建部门</h3>
+              <button onClick={() => { setShowCreateDept(false); setNewDeptName(''); }} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">部门名称 *</label>
+                <Input
+                  value={newDeptName}
+                  onChange={e => setNewDeptName(e.target.value)}
+                  className="bg-slate-700 border-slate-600 text-white"
+                  placeholder="请输入部门名称"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">部门类型</label>
+                <select
+                  value={newDeptType}
+                  onChange={e => setNewDeptType(e.target.value)}
+                  className="w-full bg-slate-700 border border-slate-600 text-white rounded px-3 py-2 text-sm"
+                >
+                  <option value="PDT">PDT（产品开发团队）</option>
+                  <option value="ROSS">ROSS（研发支持服务）</option>
+                  <option value="OTHER">OTHER（其他）</option>
+                </select>
+              </div>
+              <Button onClick={handleCreateDepartment} disabled={creatingDept} className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50">
+                <Save className="w-4 h-4 mr-2" />
+                {creatingDept ? '创建中...' : '创建部门'}
+              </Button>
+            </div>
           </div>
         </div>
       )}

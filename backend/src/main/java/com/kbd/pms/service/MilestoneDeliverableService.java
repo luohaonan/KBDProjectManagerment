@@ -92,9 +92,9 @@ public class MilestoneDeliverableService {
     ProjectEntity project = projectRepository.findById(projectId)
         .orElseThrow(() -> new ApiException(404, "项目不存在"));
 
-    // 获取该阶段的交付物定义
-    List<MilestoneDeliverableDefEntity> defs = deliverableDefRepository
-        .findByMilestoneCodeAndIsActiveTrueOrderBySortNoAsc(milestoneCode);
+    // 获取全部定义；停用槽位仅在已有历史文件时展示，确保动态调整不隐藏服务器上的旧附件。
+    List<MilestoneDeliverableDefEntity> allDefs = deliverableDefRepository
+        .findByMilestoneCodeOrderBySortNoAsc(milestoneCode);
 
     // 获取该项目该阶段已上传的文档
     Enums.MilestoneStage stage = Enums.MilestoneStage.valueOf(milestoneCode);
@@ -106,6 +106,11 @@ public class MilestoneDeliverableService {
     Map<String, List<DocumentEntity>> docsBySlot = uploadedDocs.stream()
         .filter(d -> d.getDeliverableSlotCode() != null)
         .collect(Collectors.groupingBy(DocumentEntity::getDeliverableSlotCode));
+
+    Set<String> historicalSlotCodes = docsBySlot.keySet();
+    List<MilestoneDeliverableDefEntity> defs = allDefs.stream()
+        .filter(def -> Boolean.TRUE.equals(def.getIsActive()) || historicalSlotCodes.contains(def.getSlotCode()))
+        .toList();
 
     // 组装 VO
     return defs.stream().map(def -> {
@@ -132,12 +137,15 @@ public class MilestoneDeliverableService {
     return Arrays.stream(Enums.MilestoneStage.values()).map(stage -> {
       String milestoneCode = stage.name();
       MilestoneDefEntity milestone = milestoneByCode.get(milestoneCode);
-      List<MilestoneDeliverableDefEntity> defs = deliverableDefRepository
-          .findByMilestoneCodeAndIsActiveTrueOrderBySortNoAsc(milestoneCode);
+      List<MilestoneDeliverableDefEntity> allDefs = deliverableDefRepository
+          .findByMilestoneCodeOrderBySortNoAsc(milestoneCode);
       Map<String, List<DocumentEntity>> docsBySlot = visibleDocs.stream()
           .filter(doc -> doc.getMilestonePhase() == stage)
           .filter(doc -> doc.getDeliverableSlotCode() != null)
           .collect(Collectors.groupingBy(DocumentEntity::getDeliverableSlotCode));
+      List<MilestoneDeliverableDefEntity> defs = allDefs.stream()
+          .filter(def -> Boolean.TRUE.equals(def.getIsActive()) || docsBySlot.containsKey(def.getSlotCode()))
+          .toList();
       List<DeliverableSlotVO> slots = defs.stream().map(def -> toSlotVO(def,
           docsBySlot.getOrDefault(def.getSlotCode(), List.of()))).toList();
       MilestoneDeliverableGroupVO group = new MilestoneDeliverableGroupVO();
@@ -190,8 +198,9 @@ public class MilestoneDeliverableService {
             && project.getPmUserId().equals(currentUserId));
 
     if (!canUpload && roles.contains("ROLE_DEPT_EXECUTOR")) {
-      // 检查用户所在部门是否在里程碑的执行部门列表中
-      List<Long> executorDeptIds = getExecutorDeptIdsByMilestoneCode(request.milestoneCode());
+      // 按具体附件槽位检查上传节点绑定的部门，不能用同阶段其他上传节点的部门越权上传。
+      List<Long> executorDeptIds = getExecutorDeptIdsBySlot(
+          request.milestoneCode(), request.deliverableSlotCode());
       if (!executorDeptIds.isEmpty()) {
         Set<OrgDepartmentEntity> userDepts = currentUser.getDepartments();
         if (userDepts != null) {
@@ -206,21 +215,16 @@ public class MilestoneDeliverableService {
     }
 
     if (!canUpload) {
-      String deptNames = getExecutorDeptNamesByMilestoneCode(request.milestoneCode());
+      String deptNames = getExecutorDeptNamesBySlot(
+          request.milestoneCode(), request.deliverableSlotCode());
       if (deptNames != null && !deptNames.isEmpty()) {
         throw new ApiException(403, "仅「" + deptNames + "」的部门执行人可上传交付物");
       }
       throw new ApiException(403, "无权限上传交付物");
     }
 
-    // 同一槽位只允许一个文件（如果已存在则拒绝，前端可先删除再上传）
+    // 同一槽位允许保存多个文件，新文件按上传时间追加到现有文件列表。
     Enums.MilestoneStage stage = Enums.MilestoneStage.valueOf(request.milestoneCode());
-    List<DocumentEntity> existing = documentRepository
-        .findByProjectIdAndMilestonePhaseAndDeliverableSlotCode(
-            request.projectId(), stage, request.deliverableSlotCode());
-    if (!existing.isEmpty()) {
-      throw new ApiException(409, "该交付物槽位已存在文件，请先删除后再上传");
-    }
 
     // 存储文件
     String storagePath = fileStorageService.storeFile(
@@ -272,9 +276,7 @@ public class MilestoneDeliverableService {
     } catch (IllegalArgumentException e) {
       throw new ApiException(400, "里程碑阶段必须为 G0-G9");
     }
-    if (!documentRepository.findByProjectIdAndMilestonePhaseAndDeliverableSlotCode(projectId, stage, slotCode).isEmpty()) {
-      throw new ApiException(409, "该交付物槽位已存在文件，请先删除后再导入");
-    }
+    // 历史交付物导入同样支持向已有槽位追加多个文件。
     String storagePath = fileStorageService.storeFile(file, project.getProjectCode(), stage, currentUserId);
     DocumentEntity doc = new DocumentEntity();
     doc.setFileName(file.getOriginalFilename());
@@ -378,11 +380,6 @@ public class MilestoneDeliverableService {
     DocumentEntity doc = documentRepository.findById(documentId)
         .orElseThrow(() -> new ApiException(404, "文档不存在"));
 
-    if (doc.getIsLocked()) {
-      throw new ApiException(409, "文档已锁定，无法删除");
-    }
-
-    // 权限：上传者本人 / PM / 管理员 可删除
     User currentUser = userRepository.findById(currentUserId)
         .orElseThrow(() -> new ApiException(401, "用户不存在"));
     List<String> roles = currentUser.getRoles().stream().map(Role::getName).toList();
@@ -390,8 +387,9 @@ public class MilestoneDeliverableService {
     ProjectEntity project = projectRepository.findById(doc.getProjectId())
         .orElseThrow(() -> new ApiException(404, "项目不存在"));
 
-    // 权限：ADMIN / 项目PM / 上传者本人 / 执行部门的部门执行人 可删除
-    boolean canDelete = roles.contains("ROLE_ADMIN")
+    // 权限：系统管理员 / 项目管理员 / 项目PM / 上传者本人 / 执行部门的部门执行人 可删除
+    boolean isAdministrator = roles.contains("ROLE_ADMIN") || roles.contains("ROLE_PROJECT_ADMIN");
+    boolean canDelete = isAdministrator
         || (roles.contains("ROLE_PM") && project.getPmUserId() != null
             && project.getPmUserId().equals(currentUserId))
         || doc.getUploader().equals(currentUserId);
@@ -415,6 +413,9 @@ public class MilestoneDeliverableService {
 
     if (!canDelete) {
       throw new ApiException(403, "无权限删除该交付物");
+    }
+    if (Boolean.TRUE.equals(doc.getIsLocked()) && !isAdministrator) {
+      throw new ApiException(409, "文档已锁定，无法删除");
     }
 
     // 删除物理文件
@@ -517,6 +518,34 @@ public class MilestoneDeliverableService {
         .flatMap(role -> role.getPermissions() == null ? java.util.stream.Stream.empty() : role.getPermissions().stream())
         .map(Permission::getName)
         .anyMatch(permissionName::equals);
+  }
+
+  private List<Long> getExecutorDeptIdsBySlot(String milestoneCode, String slotCode) {
+    WfProcessDefinition def = wfProcessRepository
+        .findByProcessTypeAndMilestoneCodeAndIsActiveTrue("MILESTONE", milestoneCode)
+        .orElse(null);
+    if (def == null) return Collections.emptyList();
+    return def.getNodes().stream()
+        .filter(node -> Boolean.TRUE.equals(node.getIsUploader()) || "UPLOAD".equals(node.getNodeType()))
+        .filter(node -> Objects.equals(slotCode, node.getDeliverableSlotCode()))
+        .map(WfProcessNode::getApproverValue)
+        .filter(Objects::nonNull)
+        .flatMap(value -> Arrays.stream(value.split(",")))
+        .map(String::trim).filter(value -> !value.isEmpty())
+        .map(value -> {
+          try { return Long.parseLong(value); } catch (NumberFormatException e) { return null; }
+        })
+        .filter(Objects::nonNull).distinct().toList();
+  }
+
+  private String getExecutorDeptNamesBySlot(String milestoneCode, String slotCode) {
+    return getExecutorDeptIdsBySlot(milestoneCode, slotCode).stream()
+        .map(orgDepartmentRepository::findById)
+        .flatMap(Optional::stream)
+        .map(OrgDepartmentEntity::getDeptName)
+        .filter(Objects::nonNull)
+        .distinct()
+        .collect(Collectors.joining("、"));
   }
 
   /**

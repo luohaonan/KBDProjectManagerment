@@ -100,6 +100,7 @@ public class WfProcessController {
                 node.setDecisionType(nr.decisionType());
                 node.setIsUploader(nr.isUploader() != null ? nr.isUploader() : false);
                 node.setDeliverableSlotCode(nr.deliverableSlotCode());
+                node.setDeliverableName(nr.deliverableName());
                 node.setPositionX(nr.positionX() != null ? nr.positionX() : 0);
                 node.setPositionY(nr.positionY() != null ? nr.positionY() : 0);
                 node.setSortOrder(nr.sortOrder() != null ? nr.sortOrder() : 0);
@@ -157,7 +158,7 @@ public class WfProcessController {
         public record NodeRequest(
                 String nodeCode, String nodeName, String nodeType,
                 String approverRule, String approverValue, String decisionType,
-                Boolean isUploader, String deliverableSlotCode,
+                Boolean isUploader, String deliverableSlotCode, String deliverableName,
                 Integer positionX, Integer positionY, Integer sortOrder) {}
         public record EdgeRequest(String fromNodeCode, String toNodeCode) {}
     }

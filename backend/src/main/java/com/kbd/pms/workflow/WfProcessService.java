@@ -25,6 +25,7 @@ public class WfProcessService {
     private final GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository;
     private final ProjectRepository projectRepository;
     private final RoleRepository roleRepository;
+    private final MilestoneDeliverableDefRepository deliverableDefRepository;
     private final EntityManager entityManager;
 
     public WfProcessService(
@@ -35,6 +36,7 @@ public class WfProcessService {
             GovernanceCommitteeMemberRepository governanceCommitteeMemberRepository,
             ProjectRepository projectRepository,
             RoleRepository roleRepository,
+            MilestoneDeliverableDefRepository deliverableDefRepository,
             EntityManager entityManager) {
         this.processRepository = processRepository;
         this.userRepository = userRepository;
@@ -43,6 +45,7 @@ public class WfProcessService {
         this.governanceCommitteeMemberRepository = governanceCommitteeMemberRepository;
         this.projectRepository = projectRepository;
         this.roleRepository = roleRepository;
+        this.deliverableDefRepository = deliverableDefRepository;
         this.entityManager = entityManager;
     }
 
@@ -195,11 +198,65 @@ public class WfProcessService {
         }
 
         WfProcessDefinition saved = processRepository.save(existing);
+        synchronizeDeliverableDefinitions(saved);
         System.out.println("[SVC] save() 后 saved.nodes 数量=" + (saved.getNodes() != null ? saved.getNodes().size() : 0));
         System.out.println("[SVC] save() 后 saved.edges 数量=" + (saved.getEdges() != null ? saved.getEdges().size() : 0));
         System.out.println("========== [WfProcessService.updateProcess] END ==========");
 
         return saved;
+    }
+
+    /**
+     * 将里程碑流程中的上传节点同步为动态交付物槽位。只停用被管理员从流程中移除的槽位，
+     * 不删除定义和文档，从而保证历史文件仍可追溯。
+     */
+    private void synchronizeDeliverableDefinitions(WfProcessDefinition process) {
+        if (!"MILESTONE".equals(process.getProcessType())
+                || process.getMilestoneCode() == null || process.getMilestoneCode().isBlank()) {
+            return;
+        }
+        String milestoneCode = process.getMilestoneCode();
+        List<MilestoneDeliverableDefEntity> existingDefs =
+                deliverableDefRepository.findByMilestoneCodeOrderBySortNoAsc(milestoneCode);
+        Map<String, MilestoneDeliverableDefEntity> byCode = existingDefs.stream()
+                .collect(Collectors.toMap(MilestoneDeliverableDefEntity::getSlotCode, d -> d, (a, b) -> a));
+        Set<String> configuredCodes = new HashSet<>();
+        Instant now = Instant.now();
+
+        for (WfProcessNode node : process.getNodes()) {
+            if (!Boolean.TRUE.equals(node.getIsUploader()) && !"UPLOAD".equals(node.getNodeType())) continue;
+            String slotCode = node.getDeliverableSlotCode();
+            String slotName = node.getDeliverableName();
+            if (slotCode == null || slotCode.isBlank() || slotName == null || slotName.isBlank()) continue;
+            slotCode = slotCode.trim();
+            configuredCodes.add(slotCode);
+            MilestoneDeliverableDefEntity def = byCode.get(slotCode);
+            if (def == null) {
+                def = new MilestoneDeliverableDefEntity();
+                def.setMilestoneCode(milestoneCode);
+                def.setSlotCode(slotCode);
+                def.setCreatedAt(now);
+                def.setAllowedFileTypes(".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx");
+            }
+            def.setSlotName(slotName.trim());
+            def.setDescription("由流程上传节点「" + node.getNodeName() + "」动态配置");
+            def.setIsRequired(true);
+            def.setIsActive(true);
+            def.setSortNo(node.getSortOrder() == null ? 0 : node.getSortOrder());
+            def.setUpdatedAt(now);
+            deliverableDefRepository.save(def);
+        }
+
+        // 首次使用动态节点前保持原有静态槽位；配置了至少一个动态槽位后，流程配置成为唯一有效清单。
+        if (!configuredCodes.isEmpty()) {
+            for (MilestoneDeliverableDefEntity def : existingDefs) {
+                if (!configuredCodes.contains(def.getSlotCode()) && Boolean.TRUE.equals(def.getIsActive())) {
+                    def.setIsActive(false);
+                    def.setUpdatedAt(now);
+                    deliverableDefRepository.save(def);
+                }
+            }
+        }
     }
 
     @Transactional
@@ -521,7 +578,7 @@ public class WfProcessService {
         List<WfProcessNodeResponse> nodeDtos = def.getNodes().stream()
                 .map(n -> new WfProcessNodeResponse(n.getId(), def.getId(), n.getNodeCode(), n.getNodeName(),
                         n.getNodeType(), n.getApproverRule(), n.getApproverValue(),
-                        n.getDecisionType(), n.getIsUploader(), n.getDeliverableSlotCode(),
+                        n.getDecisionType(), n.getIsUploader(), n.getDeliverableSlotCode(), n.getDeliverableName(),
                         n.getPositionX(), n.getPositionY(), n.getSortOrder()))
                 .collect(Collectors.toList());
         List<WfProcessEdgeResponse> edgeDtos = def.getEdges().stream()
@@ -540,7 +597,7 @@ public class WfProcessService {
     public record WfProcessNodeResponse(
             Long id, Long processDefinitionId, String nodeCode, String nodeName,
             String nodeType, String approverRule, String approverValue,
-            String decisionType, Boolean isUploader, String deliverableSlotCode,
+            String decisionType, Boolean isUploader, String deliverableSlotCode, String deliverableName,
             Integer positionX, Integer positionY, Integer sortOrder) {}
     public record WfProcessEdgeResponse(
             Long id, Long processDefinitionId,

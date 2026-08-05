@@ -35,7 +35,7 @@ public class OrgDepartmentEntity {
   @Column(name = "updated_at", nullable = false)
   private Instant updatedAt;
 
-  protected OrgDepartmentEntity() {}
+  public OrgDepartmentEntity() {}
 
   public Long getId() { return id; }
   public String getDeptCode() { return deptCode; }
@@ -51,6 +51,7 @@ public class OrgDepartmentEntity {
   public Boolean getIsActive() { return isActive; }
   public void setIsActive(Boolean active) { isActive = active; }
   public Instant getCreatedAt() { return createdAt; }
+  public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
   public Instant getUpdatedAt() { return updatedAt; }
   public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
 }

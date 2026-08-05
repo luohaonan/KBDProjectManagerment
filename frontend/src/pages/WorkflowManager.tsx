@@ -12,7 +12,7 @@ import { Save, GitBranch, Plus, X, GripVertical, AlertCircle, ChevronLeft, Trash
 interface ProcessNode {
   id: number; processDefinitionId: number; nodeCode: string; nodeName: string;
   nodeType: string; approverRule: string; approverValue: string; decisionType: string;
-  isUploader: boolean; deliverableSlotCode: string;
+  isUploader: boolean; deliverableSlotCode: string; deliverableName: string;
   positionX: number; positionY: number; sortOrder: number;
 }
 interface ProcessEdge {
@@ -120,7 +120,7 @@ const WorkflowManager: React.FC = () => {
 
   const [depts, setDepts] = useState<{ id: number; deptName: string; headUserId?: number }[]>([]);
   const [allUsers, setAllUsers] = useState<{ id: number; username: string }[]>([]);
-  const [executors, setExecutors] = useState<Record<string, { username: string }[]>>({});
+  const [executors, setExecutors] = useState<Record<string, { id: number; username: string }[]>>({});
 
   useEffect(() => { loadProcesses(); loadRefData(); }, [processType]);
 
@@ -131,8 +131,15 @@ const WorkflowManager: React.FC = () => {
     } catch {}
   };
   const loadExecutorsForDept = async (deptId: string) => {
-    if (executors[deptId]) return;
-    try { const r = await api.get('/api/users/by-role?role=DEPT_EXECUTOR'); setExecutors(prev => ({ ...prev, [deptId]: (r.data as any).data || [] })); } catch { setExecutors(prev => ({ ...prev, [deptId]: [] })); }
+    if (!deptId || executors[deptId]) return;
+    try {
+      const r = await api.get(`/api/departments/${deptId}/members`);
+      const members = ((r.data as any).data || []).filter((u: any) =>
+        (u.roles || []).some((role: string) => role === 'ROLE_DEPT_EXECUTOR' || role === 'DEPT_EXECUTOR'));
+      setExecutors(prev => ({ ...prev, [deptId]: members }));
+    } catch {
+      setExecutors(prev => ({ ...prev, [deptId]: [] }));
+    }
   };
 
   const loadProcesses = async () => {
@@ -183,7 +190,19 @@ const WorkflowManager: React.FC = () => {
       id, processDefinitionId: selectedProcess?.id || 0, nodeCode: `N_${Math.abs(id)}`,
       nodeName: '新节点', nodeType: 'ROLE_APPROVE', approverRule: 'ROLE_PM',
       approverValue: 'PM', decisionType: getDecisionType(), isUploader: false,
-      deliverableSlotCode: '', positionX: maxX + LAYER_X_GAP, positionY: BASE_Y + 80, sortOrder: prev.length + 1
+      deliverableSlotCode: '', deliverableName: '', positionX: maxX + LAYER_X_GAP, positionY: BASE_Y + 80, sortOrder: prev.length + 1
+    }]);
+  };
+
+  const addUploadNode = () => {
+    const maxX = nodes.length > 0 ? nodes.reduce((x, n) => Math.max(x, n.positionX ?? 0), 0) : 0;
+    const id = -(Date.now() * 1000 + Math.floor(Math.random() * 1000));
+    setNodes(prev => [...prev, {
+      id, processDefinitionId: selectedProcess?.id || 0, nodeCode: `UPLOAD_${Math.abs(id)}`,
+      nodeName: '上传附件', nodeType: 'UPLOAD', approverRule: 'DEPT_EXECUTOR',
+      approverValue: '', decisionType: 'NONE', isUploader: true,
+      deliverableSlotCode: '', deliverableName: '', positionX: Math.max(BASE_X, maxX - LAYER_X_GAP),
+      positionY: BASE_Y + prev.filter(n => n.isUploader).length * NODE_Y_GAP, sortOrder: 0
     }]);
   };
 
@@ -301,7 +320,7 @@ const WorkflowManager: React.FC = () => {
         description: selectedProcess.description,
         budgetWarningThreshold: processType === 'BUDGET' ? Number(budgetWarningThreshold || 80) : selectedProcess.budgetWarningThreshold,
         isActive: selectedProcess.isActive,
-        nodes: cleanNodes.map(n => ({ nodeCode: n.nodeCode, nodeName: n.nodeName, nodeType: n.nodeType, approverRule: n.approverRule, approverValue: n.approverValue, decisionType: n.decisionType, isUploader: n.isUploader, deliverableSlotCode: n.deliverableSlotCode, positionX: n.positionX, positionY: n.positionY, sortOrder: n.sortOrder })),
+        nodes: cleanNodes.map(n => ({ nodeCode: n.nodeCode, nodeName: n.nodeName, nodeType: n.nodeType, approverRule: n.approverRule, approverValue: n.approverValue, decisionType: n.decisionType, isUploader: n.isUploader, deliverableSlotCode: n.deliverableSlotCode, deliverableName: n.deliverableName, positionX: n.positionX, positionY: n.positionY, sortOrder: n.sortOrder })),
         edges: cleanEdges.map(e => ({ fromNodeCode: e.fromNodeCode, toNodeCode: e.toNodeCode })),
       };
       console.log('[handleSave] 发送 payload.nodes 数量=', payload.nodes.length);
@@ -334,8 +353,15 @@ const WorkflowManager: React.FC = () => {
 
   const confirmNodeEdit = () => {
     if (!editingNode) return;
-    const correctDt = getDecisionType();
-    const nodeToSave = editingNode.decisionType !== correctDt ? { ...editingNode, decisionType: correctDt } : editingNode;
+    if (editingNode.isUploader && (!editingNode.approverValue || !editingNode.deliverableName.trim())) {
+      toast.error('上传节点必须选择上传部门并填写附件名称');
+      return;
+    }
+    const generatedSlotCode = editingNode.isUploader && !editingNode.deliverableSlotCode
+      ? `${selectedProcess?.milestoneCode || 'FILE'}_${Date.now()}`
+      : editingNode.deliverableSlotCode;
+    const correctDt = editingNode.isUploader ? 'NONE' : getDecisionType();
+    const nodeToSave = { ...editingNode, deliverableSlotCode: generatedSlotCode, decisionType: correctDt };
     setNodes(prev => prev.map(n => n.id === nodeToSave.id ? nodeToSave : n));
     setEditingNode(null);
   };
@@ -379,7 +405,8 @@ const WorkflowManager: React.FC = () => {
             <CardTitle className="text-slate-100">{selectedProcess ? (selectedProcess.description || selectedProcess.milestoneCode || selectedProcess.processType) : '请选择流程'}</CardTitle>
             {selectedProcess && (
               <div className="flex gap-2 flex-wrap">
-                <Button size="sm" onClick={addNode} className="bg-green-600 hover:bg-green-700"><Plus className="w-3 h-3 mr-1" />添加节点</Button>
+                {processType === 'MILESTONE' && <Button size="sm" onClick={addUploadNode} className="bg-cyan-600 hover:bg-cyan-700"><Plus className="w-3 h-3 mr-1" />添加上传节点</Button>}
+                <Button size="sm" onClick={addNode} className="bg-green-600 hover:bg-green-700"><Plus className="w-3 h-3 mr-1" />添加审批节点</Button>
                 {unconnectedNodes.length > 0 && (
                   <Button size="sm" onClick={deleteAllOrphanNodes} className="bg-red-700 hover:bg-red-800"><Trash2 className="w-3 h-3 mr-1" />删除未连接({unconnectedNodes.length})</Button>
                 )}
@@ -469,9 +496,26 @@ const WorkflowManager: React.FC = () => {
                   <label className="text-sm text-slate-400 block">节点名称</label>
                   <Input value={editingNode.nodeName} onChange={e => setEditingNode({ ...editingNode, nodeName: e.target.value })} className="bg-slate-700 border-slate-600 text-slate-100 text-sm mb-3" />
                   {editingNode.isUploader ? (
-                    <div className="space-y-2 p-3 bg-slate-700/50 rounded border border-slate-600">
-                      <div><label className="text-xs text-slate-500">上传部门</label><p className="text-sm">{findDeptName(editingNode.approverValue)}</p></div>
-                      <div><label className="text-xs text-slate-500">部门执行人</label><p className="text-xs text-slate-300">{getExecutors(editingNode.approverValue)}</p></div>
+                    <div className="space-y-3 p-3 bg-slate-700/50 rounded border border-slate-600">
+                      <div>
+                        <label className="text-xs text-slate-400 block mb-1">附件名称</label>
+                        <Input value={editingNode.deliverableName || ''} placeholder="例如：立项报告"
+                          onChange={e => setEditingNode({ ...editingNode, deliverableName: e.target.value })}
+                          className="bg-slate-700 border-slate-600 text-slate-100 text-sm" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-400 block mb-1">上传部门</label>
+                        <select value={editingNode.approverValue || ''} onChange={e => {
+                          const deptId = e.target.value;
+                          setEditingNode({ ...editingNode, approverValue: deptId });
+                          loadExecutorsForDept(deptId);
+                        }} className="w-full bg-slate-700 border border-slate-600 text-slate-100 rounded px-3 py-2 text-sm">
+                          <option value="">请选择上传部门</option>
+                          {depts.map(d => <option key={d.id} value={String(d.id)}>{d.deptName}</option>)}
+                        </select>
+                      </div>
+                      <div><label className="text-xs text-slate-400">该部门执行人</label><p className="text-xs text-slate-300 mt-1">{editingNode.approverValue ? getExecutors(editingNode.approverValue) : '请先选择部门'}</p></div>
+                      {editingNode.deliverableSlotCode && <div className="text-[10px] text-slate-500">槽位编码：{editingNode.deliverableSlotCode}（保留此编码可继续关联历史附件）</div>}
                     </div>
                   ) : (
                     <>

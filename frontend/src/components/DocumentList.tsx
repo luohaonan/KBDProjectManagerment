@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { CheckCircle, Clock, Download, Eye, FileText, FolderInput, Loader2, Lock, Upload, XCircle } from 'lucide-react';
+import { CheckCircle, Clock, Download, Eye, FileText, FolderInput, Loader2, Lock, Trash2, Upload, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../lib/api';
 
@@ -30,6 +30,7 @@ const DocumentList: React.FC<DocumentListProps> = ({ projectId, userRoles = [], 
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const canImport = userPermissions.includes('PERMISSION_DELIVERABLE_IMPORT') || userRoles.includes('ROLE_ADMIN') || userRoles.includes('ROLE_PROJECT_ADMIN');
+  const canDelete = userRoles.includes('ROLE_ADMIN') || userRoles.includes('ROLE_PROJECT_ADMIN');
 
   const loadSlotGroups = async () => {
     setLoading(true);
@@ -69,35 +70,58 @@ const DocumentList: React.FC<DocumentListProps> = ({ projectId, userRoles = [], 
     } catch (error: any) { toast.error(error.response?.status === 403 ? '无权访问该文件' : '文件打开失败'); }
   };
 
-  const importHistoricalFile = async (group: MilestoneDeliverableGroup, slot: DeliverableSlot, file?: File | null) => {
-    if (!file) return;
+  const uploadFiles = async (group: MilestoneDeliverableGroup, slot: DeliverableSlot, selected?: FileList | null) => {
+    const files = Array.from(selected || []);
+    if (files.length === 0) return;
     const uploadKey = `${group.milestoneCode}:${slot.slotCode}`;
-    const form = new FormData();
-    form.append('file', file); form.append('projectId', projectId); form.append('milestoneCode', group.milestoneCode); form.append('slotCode', slot.slotCode); form.append('fileType', slot.slotName);
     setUploadingSlot(uploadKey);
+    let uploaded = 0;
     try {
-      await api.post('/api/milestone-deliverables/import', form, { headers: { 'Content-Type': 'multipart/form-data' } });
-      toast.success(`${group.milestoneCode}「${slot.slotName}」导入成功，项目阶段已同步`);
+      for (const file of files) {
+        const form = new FormData();
+        form.append('file', file); form.append('projectId', projectId); form.append('milestoneCode', group.milestoneCode); form.append('slotCode', slot.slotCode); form.append('fileType', slot.slotName);
+        await api.post('/api/milestone-deliverables/import', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+        uploaded++;
+      }
+      toast.success(`${uploaded} 个文件上传成功`);
       await loadSlotGroups();
-    } catch (error: any) { toast.error(error.response?.data?.message || '交付物导入失败'); }
-    finally { setUploadingSlot(null); const input = fileInputRefs.current[uploadKey]; if (input) input.value = ''; }
+    } catch (error: any) {
+      if (uploaded > 0) await loadSlotGroups();
+      toast.error(error.response?.data?.message || `文件上传失败，已成功上传 ${uploaded} 个`);
+    } finally {
+      setUploadingSlot(null);
+      const input = fileInputRefs.current[uploadKey];
+      if (input) input.value = '';
+    }
+  };
+
+  const deleteDocument = async (doc: Document) => {
+    if (!window.confirm(`确定要删除文件“${doc.fileName}”吗？`)) return;
+    try {
+      await api.delete(`/api/milestone-deliverables/${doc.id}`);
+      toast.success('文件已删除');
+      await loadSlotGroups();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || '删除文件失败');
+    }
   };
 
   const renderDocument = (doc: Document) => (
     <div key={doc.id} className="flex flex-col gap-3 rounded-md border border-slate-600 bg-slate-900/60 p-3 md:flex-row md:items-center md:justify-between">
       <div className="flex items-start gap-3 min-w-0"><FileText className="w-5 h-5 text-blue-400 mt-0.5 shrink-0" /><div className="min-w-0"><div className="text-slate-100 font-medium truncate">{doc.fileName}</div><div className="text-xs text-slate-400 mt-1 flex flex-wrap gap-x-3 gap-y-1"><span>上传时间: {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString('zh-CN') : '-'}</span><span>槽位编码: {doc.deliverableSlotCode}</span></div></div></div>
-      <div className="flex items-center gap-2 shrink-0">{getStatusBadge(doc.complianceStatus, doc.isLocked)}<Button size="sm" variant="outline" onClick={() => openFile(doc, 'preview')} title="预览文件" className="bg-slate-700 text-slate-100 border-slate-600"><Eye className="w-4 h-4" /></Button><Button size="sm" variant="outline" onClick={() => openFile(doc, 'download')} title="下载文件" className="bg-slate-700 text-slate-100 border-slate-600"><Download className="w-4 h-4" /></Button></div>
+      <div className="flex items-center gap-2 shrink-0">{getStatusBadge(doc.complianceStatus, doc.isLocked)}<Button size="sm" variant="outline" onClick={() => openFile(doc, 'preview')} title="预览文件" className="bg-slate-700 text-slate-100 border-slate-600"><Eye className="w-4 h-4" /></Button><Button size="sm" variant="outline" onClick={() => openFile(doc, 'download')} title="下载文件" className="bg-slate-700 text-slate-100 border-slate-600"><Download className="w-4 h-4" /></Button>{canDelete && <Button size="sm" variant="outline" onClick={() => deleteDocument(doc)} title="删除文件" className="border-red-800 text-red-400 hover:bg-red-900/30"><Trash2 className="w-4 h-4" /></Button>}</div>
     </div>
   );
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-4"><div><h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2"><FileText className="w-5 h-5 text-blue-400" />项目交付物管理</h3><p className="text-sm text-slate-400 mt-1">G0-G9 固定交付物槽位全部展开；空槽位以文件名称占位，管理员可直接导入历史交付物。</p></div>{canImport && <Badge className="bg-blue-600 text-white"><FolderInput className="w-3 h-3 mr-1" />管理员直传已启用</Badge>}</div>
+      <div className="flex items-start justify-between gap-4"><div><h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2"><FileText className="w-5 h-5 text-blue-400" />项目交付物管理</h3><p className="text-sm text-slate-400 mt-1">G0-G9 固定交付物槽位全部展开；每个槽位支持一次选择多个文件，新文件将追加到已有列表下方。</p></div>{canImport && <Badge className="bg-blue-600 text-white"><FolderInput className="w-3 h-3 mr-1" />管理员直传已启用</Badge>}</div>
       {loading ? <div className="flex items-center gap-2 text-slate-400 text-sm py-8 justify-center"><Loader2 className="w-5 h-5 animate-spin" />加载中...</div> : <div className="space-y-5">{groups.map((group) => (
         <Card key={group.milestoneCode} className="bg-slate-800 border-slate-600"><CardHeader className="pb-3"><div className="flex items-center justify-between gap-3"><CardTitle className="text-slate-100 text-base">{group.phaseLabel}</CardTitle><Badge className={group.uploadedCount === group.totalCount && group.totalCount > 0 ? 'bg-green-600 text-white' : 'bg-slate-700 text-slate-200'}>{group.uploadedCount}/{group.totalCount} 已上传</Badge></div></CardHeader><CardContent className="space-y-3">
           {group.slots.length === 0 ? <div className="text-sm text-slate-500 py-3">该阶段暂无交付物定义</div> : group.slots.map((slot) => {
             const uploadKey = `${group.milestoneCode}:${slot.slotCode}`; const hasDocuments = slot.documents && slot.documents.length > 0;
-            return <div key={slot.slotCode} className="rounded-lg border border-slate-700 bg-slate-900/30 p-4"><div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><div className="flex items-center gap-2"><span className="font-medium text-slate-100">{slot.slotName}</span>{slot.isRequired && <Badge variant="outline" className="border-orange-400 text-orange-300">必传</Badge>}{!hasDocuments && <Badge variant="outline" className="border-slate-500 text-slate-400">空槽位</Badge>}</div><div className="text-xs text-slate-500 mt-1">固定槽位：{slot.slotCode}</div>{slot.description && <div className="text-xs text-slate-400 mt-1">{slot.description}</div>}</div>{canImport && !hasDocuments && <div className="shrink-0"><input ref={(el) => { fileInputRefs.current[uploadKey] = el; }} type="file" className="hidden" onChange={(e) => importHistoricalFile(group, slot, e.target.files?.[0])} /><Button size="sm" disabled={uploadingSlot === uploadKey} onClick={() => fileInputRefs.current[uploadKey]?.click()} className="bg-blue-600 hover:bg-blue-700 text-white">{uploadingSlot === uploadKey ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}上传到此槽位</Button></div>}</div><div className="mt-3 space-y-2">{hasDocuments ? slot.documents.map(renderDocument) : <div className="rounded-md border border-dashed border-slate-600 p-3 text-sm text-slate-500">等待上传：{slot.slotName}</div>}</div></div>;
+            return <div key={slot.slotCode} className="rounded-lg border border-slate-700 bg-slate-900/30 p-4"><div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><div><div className="flex items-center gap-2"><span className="font-medium text-slate-100">{slot.slotName}</span>{slot.isRequired && <Badge variant="outline" className="border-orange-400 text-orange-300">必传</Badge>}{!hasDocuments && <Badge variant="outline" className="border-slate-500 text-slate-400">空槽位</Badge>}</div><div className="text-xs text-slate-500 mt-1">固定槽位：{slot.slotCode}</div>{slot.description && <div className="text-xs text-slate-400 mt-1">{slot.description}</div>}</div>{canImport && <div className="shrink-0"><input ref={(el) => { fileInputRefs.current[uploadKey] = el; }} type="file" multiple accept={slot.allowedFileTypes || '.pdf,.doc,.docx'} className="hidden" onChange={(e) => uploadFiles(group, slot, e.target.files)} /><Button size="sm" disabled={uploadingSlot === uploadKey} onClick={() => fileInputRefs.current[uploadKey]?.click()} className="bg-blue-600 hover:bg-blue-700 text-white">{uploadingSlot === uploadKey ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}上传文件</Button></div>}</div><div className="mt-3 space-y-2">{hasDocuments ? slot.documents.map(renderDocument) : <div className="rounded-md border border-dashed border-slate-600 p-3 text-sm text-slate-500">等待上传：{slot.slotName}</div>}</div>
+            </div>;
           })}
         </CardContent></Card>
       ))}</div>}

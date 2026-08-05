@@ -21,6 +21,23 @@ public class DepartmentController {
     }
 
     /**
+     * 新建部门
+     * 请求体: { "deptName": "部门名称", "deptType": "PDT"|"ROSS"|"OTHER", "parentId": 可选 }
+     */
+    @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Result<DepartmentDto>> createDepartment(@RequestBody Map<String, Object> body) {
+        String deptName = body.get("deptName") != null ? String.valueOf(body.get("deptName")) : null;
+        String deptType = body.get("deptType") != null ? String.valueOf(body.get("deptType")) : null;
+        Long parentId = null;
+        if (body.get("parentId") != null) {
+            parentId = Long.valueOf(String.valueOf(body.get("parentId")));
+        }
+        DepartmentDto dto = departmentService.createDepartment(deptName, deptType, parentId);
+        return ResponseEntity.ok(Result.ok(dto));
+    }
+
+    /**
      * 获取所有部门列表
      */
     @GetMapping

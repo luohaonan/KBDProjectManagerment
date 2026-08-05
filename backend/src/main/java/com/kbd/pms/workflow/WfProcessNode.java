@@ -39,6 +39,9 @@ public class WfProcessNode {
     @Column(name = "deliverable_slot_code", length = 64)
     private String deliverableSlotCode;
 
+    @Column(name = "deliverable_name", length = 256)
+    private String deliverableName;
+
     @Column(name = "position_x", nullable = false)
     private Integer positionX = 0;
 
@@ -76,6 +79,8 @@ public class WfProcessNode {
     public void setIsUploader(Boolean isUploader) { this.isUploader = isUploader; }
     public String getDeliverableSlotCode() { return deliverableSlotCode; }
     public void setDeliverableSlotCode(String deliverableSlotCode) { this.deliverableSlotCode = deliverableSlotCode; }
+    public String getDeliverableName() { return deliverableName; }
+    public void setDeliverableName(String deliverableName) { this.deliverableName = deliverableName; }
     public Integer getPositionX() { return positionX; }
     public void setPositionX(Integer positionX) { this.positionX = positionX; }
     public Integer getPositionY() { return positionY; }

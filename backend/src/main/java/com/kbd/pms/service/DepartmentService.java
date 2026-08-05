@@ -2,6 +2,7 @@ package com.kbd.pms.service;
 
 import com.kbd.pms.dto.DepartmentDto;
 import com.kbd.pms.dto.UserDto;
+import com.kbd.pms.entity.Enums;
 import com.kbd.pms.entity.OrgDepartmentEntity;
 import com.kbd.pms.entity.User;
 import com.kbd.pms.exception.ApiException;
@@ -13,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -25,6 +27,54 @@ public class DepartmentService {
     public DepartmentService(OrgDepartmentRepository deptRepository, UserRepository userRepository) {
         this.deptRepository = deptRepository;
         this.userRepository = userRepository;
+    }
+
+    /**
+     * 新建部门
+     */
+    @Transactional
+    public DepartmentDto createDepartment(String deptName, String deptType, Long parentId) {
+        if (deptName == null || deptName.trim().isEmpty()) {
+            throw new ApiException(400, "部门名称不能为空");
+        }
+        // 校验部门名称唯一
+        List<OrgDepartmentEntity> existing = deptRepository.findAll();
+        boolean nameExists = existing.stream()
+                .anyMatch(d -> d.getDeptName() != null && d.getDeptName().equalsIgnoreCase(deptName.trim()));
+        if (nameExists) {
+            throw new ApiException(400, "部门名称已存在");
+        }
+
+        OrgDepartmentEntity dept = new OrgDepartmentEntity();
+        dept.setDeptName(deptName.trim());
+        // 生成唯一部门编码：DEPT_ + 随机短码
+        String code;
+        do {
+            code = "DEPT_" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        } while (deptRepository.findByDeptCode(code).isPresent());
+        dept.setDeptCode(code);
+
+        // 部门类型
+        if (deptType != null && !deptType.trim().isEmpty()) {
+            try {
+                dept.setDeptType(Enums.DepartmentType.valueOf(deptType.trim().toUpperCase()));
+            } catch (IllegalArgumentException e) {
+                throw new ApiException(400, "无效的部门类型: " + deptType);
+            }
+        } else {
+            dept.setDeptType(Enums.DepartmentType.OTHER);
+        }
+        dept.setParentId(parentId);
+        dept.setIsActive(Boolean.TRUE);
+        Instant now = Instant.now();
+        dept.setCreatedAt(now);
+        dept.setUpdatedAt(now);
+
+        dept = deptRepository.save(dept);
+
+        DepartmentDto dto = DepartmentDto.fromEntity(dept);
+        dto.setMemberCount(0);
+        return dto;
     }
 
     /**
