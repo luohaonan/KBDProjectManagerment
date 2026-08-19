@@ -17,7 +17,14 @@ Defaults are in `src/main/resources/application.yml` and can be overridden via e
 - `DB_PORT` (default `3306`)
 - `DB_NAME` (default `kbd_pm_system`)
 - `DB_USER` (default `root`)
-- `DB_PASSWORD` (default `root`)
+- `DB_PASSWORD` (default is empty)
+
+## JWT configuration
+
+- `JWT_SECRET` overrides the development-only fallback secret.
+- For HS256, `JWT_SECRET` must be at least 32 bytes (256 bits). Always set a random secret in production.
+- Restart the backend after changing `JWT_SECRET`; tokens signed with the previous secret become invalid.
+- `JWT_EXPIRATION` defaults to `86400000` milliseconds (24 hours).
 
 ## JPA mapping notes
 

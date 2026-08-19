@@ -11,12 +11,13 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
-  login: (token: string) => void;
+  login: (token: string, mustChangePassword?: boolean) => void;
   logout: () => void;
   isAuthenticated: boolean;
   hasRole: (role: string) => boolean;
   hasPermission: (permission: string) => boolean;
   refreshUserInfo: () => Promise<void>;
+  mustChangePassword: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -73,6 +74,9 @@ interface AuthProviderProps {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [mustChangePassword, setMustChangePassword] = useState(
+    () => localStorage.getItem('mustChangePassword') === 'true'
+  );
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -81,9 +85,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (parsedUser) {
         setUser(parsedUser);
         // 异步从服务器获取最新权限信息
-        fetchUserInfo();
+        if (!mustChangePassword) fetchUserInfo();
       } else {
         localStorage.removeItem('token');
+        localStorage.removeItem('mustChangePassword');
+        setMustChangePassword(false);
       }
     }
   }, []);
@@ -107,23 +113,29 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const login = (token: string) => {
+  const login = (token: string, passwordChangeRequired = false) => {
     localStorage.setItem('token', token);
+    localStorage.setItem('mustChangePassword', String(passwordChangeRequired));
+    setMustChangePassword(passwordChangeRequired);
     const parsedUser = buildUserFromToken(token);
     if (parsedUser) {
       setUser(parsedUser);
       // 异步获取完整信息
-      fetchUserInfo();
+      if (!passwordChangeRequired) fetchUserInfo();
     } else {
       // token 解析失败，清除并登出
       localStorage.removeItem('token');
+      localStorage.removeItem('mustChangePassword');
       setUser(null);
+      setMustChangePassword(false);
     }
   };
 
   const logout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('mustChangePassword');
     setUser(null);
+    setMustChangePassword(false);
   };
 
   const refreshUserInfo = useCallback(async () => {
@@ -141,7 +153,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isAuthenticated, hasRole, hasPermission, refreshUserInfo }}>
+    <AuthContext.Provider value={{ user, login, logout, isAuthenticated, hasRole, hasPermission, refreshUserInfo, mustChangePassword }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,6 +1,8 @@
 package com.kbd.pms.security;
 
+import com.kbd.pms.entity.User;
 import com.kbd.pms.service.UserService;
+import com.kbd.pms.web.AuthController;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -8,6 +10,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -21,10 +24,12 @@ public class AuthTokenFilter extends OncePerRequestFilter {
 
     private final JwtUtils jwtUtils;
     private final UserService userService;
+    private final PasswordEncoder passwordEncoder;
 
-    public AuthTokenFilter(JwtUtils jwtUtils, UserService userService) {
+    public AuthTokenFilter(JwtUtils jwtUtils, UserService userService, PasswordEncoder passwordEncoder) {
         this.jwtUtils = jwtUtils;
         this.userService = userService;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Override
@@ -41,6 +46,17 @@ public class AuthTokenFilter extends OncePerRequestFilter {
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
                 SecurityContextHolder.getContext().setAuthentication(authentication);
+
+                User user = userService.findByUsername(username).orElse(null);
+                if (user != null
+                        && passwordEncoder.matches(AuthController.INITIAL_PASSWORD, user.getPassword())
+                        && !request.getRequestURI().equals("/api/auth/change-initial-password")) {
+                    response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                    response.setCharacterEncoding("UTF-8");
+                    response.setContentType("application/json;charset=UTF-8");
+                    response.getWriter().write("{\"code\":403,\"message\":\"请先修改初始密码\"}");
+                    return;
+                }
             }
         } catch (Exception e) {
             logger.error("Cannot set user authentication: {}", e);

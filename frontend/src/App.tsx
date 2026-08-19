@@ -15,10 +15,11 @@ import WorkflowManager from './pages/WorkflowManager';
 import NotificationCenter from './pages/NotificationCenter';
 import NotificationBell from './components/NotificationBell';
 import EmailConfig from './pages/EmailConfig';
+import ChangeInitialPassword from './pages/ChangeInitialPassword';
 import { Button } from './components/ui/button';
 
 const AppContent: React.FC = () => {
-  const { user, isAuthenticated, logout, hasRole } = useAuth();
+  const { user, isAuthenticated, logout, hasRole, mustChangePassword } = useAuth();
   const navigate = useNavigate();
 
   const handleAccountManagement = () => {
@@ -30,7 +31,7 @@ const AppContent: React.FC = () => {
       <header className="border-b bg-white/90 px-4 py-3 shadow-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
           <div className="text-lg font-semibold text-slate-900">项目管理系统</div>
-          {isAuthenticated ? (
+          {isAuthenticated && !mustChangePassword ? (
             <div className="flex items-center gap-4 text-sm text-slate-700">
               <div>
                 <span className="font-medium">{user?.username}</span>
@@ -61,6 +62,7 @@ const AppContent: React.FC = () => {
       </header>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/change-initial-password" element={<ChangeInitialPassword />} />
         <Route
           path="/dashboard"
           element={
@@ -141,8 +143,8 @@ const AppContent: React.FC = () => {
             </ProtectedRoute>
           }
         />
-        <Route path="/" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />} />
-        <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />} />
+        <Route path="/" element={<Navigate to={isAuthenticated ? (mustChangePassword ? '/change-initial-password' : '/dashboard') : '/login'} replace />} />
+        <Route path="*" element={<Navigate to={isAuthenticated ? (mustChangePassword ? '/change-initial-password' : '/dashboard') : '/login'} replace />} />
       </Routes>
       <Toaster />
     </div>

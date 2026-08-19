@@ -25,7 +25,8 @@ spring:
     time-zone: UTC
 
 jwt:
-  secret: ${JWT_SECRET:change-me-in-env-file}
+  # Development-only fallback (32+ bytes for HS256). Production must set JWT_SECRET.
+  secret: ${JWT_SECRET:kbd-pms-development-jwt-secret-change-me}
   expiration: ${JWT_EXPIRATION:86400000}
 
 logging:

@@ -18,14 +18,14 @@ const Login: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, mustChangePassword } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const from = (location.state as any)?.from?.pathname || '/dashboard';
 
   if (isAuthenticated) {
-    return React.createElement(Navigate, { to: "/dashboard", replace: true });
+    return <Navigate to={mustChangePassword ? '/change-initial-password' : '/dashboard'} replace />;
   }
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -43,11 +43,13 @@ const Login: React.FC = () => {
         throw new Error('登录失败');
       }
 
-      login(token);
+      const passwordChangeRequired = response.data?.mustChangePassword === true;
+      login(token, passwordChangeRequired);
       toast.success('登录成功');
-      navigate(from, { replace: true });
+      navigate(passwordChangeRequired ? '/change-initial-password' : from, { replace: true });
     } catch (error) {
-      toast.error('登录失败，请检查用户名和密码');
+      const message = (error as any)?.response?.data?.message;
+      toast.error(message || '登录失败，请检查用户名和密码');
     } finally {
       setLoading(false);
     }
