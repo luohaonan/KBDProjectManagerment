@@ -17,6 +17,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 
 @RestController
 @RequestMapping("/api/documents")
@@ -80,7 +81,7 @@ public class DocumentController {
     documentService.assertCanView(doc);
 
     Resource resource = fileStorageService.loadFileAsResource(doc.getStoragePath());
-    MediaType mediaType = MediaType.APPLICATION_OCTET_STREAM;
+    MediaType mediaType = mediaTypeFor(doc.getFileName());
     return ResponseEntity.ok()
         .contentType(mediaType)
         .header(HttpHeaders.CONTENT_DISPOSITION,
@@ -94,7 +95,7 @@ public class DocumentController {
     documentService.assertCanView(doc);
 
     Resource resource = fileStorageService.loadFileAsResource(doc.getStoragePath());
-    String fileName = doc.getFileName().toLowerCase();
+    String fileName = doc.getFileName().toLowerCase(Locale.ROOT);
     MediaType mediaType;
     if (fileName.endsWith(".pdf")) {
       mediaType = MediaType.APPLICATION_PDF;
@@ -106,13 +107,38 @@ public class DocumentController {
       mediaType = MediaType.IMAGE_GIF;
     } else if (fileName.endsWith(".txt") || fileName.endsWith(".csv") || fileName.endsWith(".log")) {
       mediaType = MediaType.TEXT_PLAIN;
+    } else if (fileName.endsWith(".docx")) {
+      mediaType = MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    } else if (fileName.endsWith(".xlsx")) {
+      mediaType = MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    } else if (fileName.endsWith(".xls")) {
+      mediaType = MediaType.parseMediaType("application/vnd.ms-excel");
     } else {
-      mediaType = MediaType.APPLICATION_OCTET_STREAM;
+      throw new com.kbd.pms.exception.ApiException(400, "该文件类型不支持在线预览");
     }
     return ResponseEntity.ok()
         .contentType(mediaType)
         .header(HttpHeaders.CONTENT_DISPOSITION,
             ContentDisposition.inline().filename(doc.getFileName(), StandardCharsets.UTF_8).build().toString())
         .body(resource);
+  }
+
+  private MediaType mediaTypeFor(String fileName) {
+    String lowerName = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
+    if (lowerName.endsWith(".pdf")) return MediaType.APPLICATION_PDF;
+    if (lowerName.endsWith(".png")) return MediaType.IMAGE_PNG;
+    if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) return MediaType.IMAGE_JPEG;
+    if (lowerName.endsWith(".gif")) return MediaType.IMAGE_GIF;
+    if (lowerName.endsWith(".txt") || lowerName.endsWith(".csv") || lowerName.endsWith(".log")) {
+      return MediaType.TEXT_PLAIN;
+    }
+    if (lowerName.endsWith(".docx")) {
+      return MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    }
+    if (lowerName.endsWith(".xlsx")) {
+      return MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    }
+    if (lowerName.endsWith(".xls")) return MediaType.parseMediaType("application/vnd.ms-excel");
+    return MediaType.APPLICATION_OCTET_STREAM;
   }
 }
