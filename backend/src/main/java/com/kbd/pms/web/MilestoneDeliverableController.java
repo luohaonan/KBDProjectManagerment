@@ -7,16 +7,12 @@ import com.kbd.pms.service.MilestoneDeliverableService;
 import com.kbd.pms.service.SecurityHelper;
 import jakarta.validation.Valid;
 import org.springframework.core.io.Resource;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.Locale;
 import java.util.List;
 
 /**
@@ -104,23 +100,6 @@ public class MilestoneDeliverableController {
   }
 
   /**
-   * 下载交付物文件
-   */
-  @GetMapping("/{documentId}/download")
-  public ResponseEntity<Resource> downloadDeliverable(@PathVariable Long documentId) throws IOException {
-    DocumentEntity doc = deliverableService.getDocumentById(documentId);
-    deliverableService.assertCanView(doc);
-
-    Resource resource = fileStorageService.loadFileAsResource(doc.getStoragePath());
-    MediaType mediaType = mediaTypeFor(doc.getFileName());
-    return ResponseEntity.ok()
-        .contentType(mediaType)
-        .header(HttpHeaders.CONTENT_DISPOSITION,
-            ContentDisposition.attachment().filename(doc.getFileName(), StandardCharsets.UTF_8).build().toString())
-        .body(resource);
-  }
-
-  /**
    * 预览交付物文件
    */
   @GetMapping("/{documentId}/preview")
@@ -153,27 +132,7 @@ public class MilestoneDeliverableController {
 
     return ResponseEntity.ok()
         .contentType(mediaType)
-        .header(HttpHeaders.CONTENT_DISPOSITION,
-            ContentDisposition.inline().filename(doc.getFileName(), StandardCharsets.UTF_8).build().toString())
         .body(resource);
   }
 
-  private MediaType mediaTypeFor(String fileName) {
-    String lowerName = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
-    if (lowerName.endsWith(".pdf")) return MediaType.APPLICATION_PDF;
-    if (lowerName.endsWith(".png")) return MediaType.IMAGE_PNG;
-    if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) return MediaType.IMAGE_JPEG;
-    if (lowerName.endsWith(".gif")) return MediaType.IMAGE_GIF;
-    if (lowerName.endsWith(".txt") || lowerName.endsWith(".csv") || lowerName.endsWith(".log")) {
-      return MediaType.TEXT_PLAIN;
-    }
-    if (lowerName.endsWith(".docx")) {
-      return MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-    }
-    if (lowerName.endsWith(".xlsx")) {
-      return MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    }
-    if (lowerName.endsWith(".xls")) return MediaType.parseMediaType("application/vnd.ms-excel");
-    return MediaType.APPLICATION_OCTET_STREAM;
-  }
 }

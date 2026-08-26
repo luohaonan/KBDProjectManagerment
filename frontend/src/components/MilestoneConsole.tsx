@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Textarea } from './ui/textarea';
-import { FileUp, CheckCircle, AlertCircle, Save, Send, ThumbsUp, ThumbsDown, History, Loader2, FileText, Download, Eye, Trash2 } from 'lucide-react';
+import { FileUp, CheckCircle, AlertCircle, Save, Send, ThumbsUp, ThumbsDown, History, Loader2, FileText, Eye, Trash2 } from 'lucide-react';
 import api from '../lib/api';
 import { toast } from 'sonner';
 
@@ -329,25 +329,6 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
       });
   };
 
-  // 下载交付物
-  const handleDownload = (docId: number, fileName: string) => {
-    const token = localStorage.getItem('token');
-    const url = `${api.defaults.baseURL}/api/milestone-deliverables/${docId}/download`;
-    // 使用 fetch 携带 token 下载
-    fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(res => res.blob())
-      .then(blob => {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = fileName;
-        a.click();
-        URL.revokeObjectURL(a.href);
-      })
-      .catch(() => toast.error('下载失败'));
-  };
-
   const allRequiredUploaded = deliverableSlots
     .filter(s => s.isRequired)
     .every(s => s.documents && s.documents.length > 0);
@@ -590,13 +571,6 @@ export const MilestoneConsole: React.FC<MilestoneConsoleProps> = ({
                                 onClick={() => handlePreview(doc.id)}
                               >
                                 <Eye className="w-4 h-4" />
-                              </button>
-                              <button
-                                className="p-1.5 rounded hover:bg-slate-600 transition text-slate-300 hover:text-white"
-                                title="下载"
-                                onClick={() => handleDownload(doc.id, doc.fileName)}
-                              >
-                                <Download className="w-4 h-4" />
                               </button>
                               {((allowUpload && !doc.isLocked) || isAdministrator) && (
                                 <button

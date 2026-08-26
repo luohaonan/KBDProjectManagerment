@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { CheckCircle, Clock, Download, Eye, FileText, FolderInput, Loader2, Lock, Trash2, Upload, XCircle } from 'lucide-react';
+import { CheckCircle, Clock, Eye, FileText, FolderInput, Loader2, Lock, Trash2, Upload, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '../lib/api';
 
@@ -37,18 +37,6 @@ const DocumentList: React.FC<DocumentListProps> = ({ projectId, userRoles = [], 
     return ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.txt', '.csv', '.log', '.docx', '.xls', '.xlsx'].some((extension) => name.endsWith(extension));
   };
 
-  const getResponseFileName = (response: { headers?: { [key: string]: unknown } }, fallback: string) => {
-    const headerValue = response.headers?.['content-disposition'];
-    if (typeof headerValue !== 'string') return fallback;
-    const header = headerValue;
-    const encoded = header.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-    if (encoded) {
-      try { return decodeURIComponent(encoded); } catch { return fallback; }
-    }
-    const plain = header.match(/filename="?([^";]+)"?/i)?.[1];
-    return plain || fallback;
-  };
-
   const loadSlotGroups = async () => {
     setLoading(true);
     try {
@@ -73,18 +61,18 @@ const DocumentList: React.FC<DocumentListProps> = ({ projectId, userRoles = [], 
     }
   };
 
-  const openFile = async (doc: Document, mode: 'preview' | 'download') => {
-    const previewWindow = mode === 'preview' ? window.open('', '_blank') : null;
+  const openFile = async (doc: Document) => {
+    const previewWindow = window.open('', '_blank');
     try {
-      const response = await api.get(`/api/milestone-deliverables/${doc.id}/${mode}`, { responseType: 'blob' });
+      const response = await api.get(`/api/milestone-deliverables/${doc.id}/preview`, { responseType: 'blob' });
       const lowerName = doc.fileName.toLowerCase();
-      if (mode === 'preview' && previewWindow && lowerName.endsWith('.docx')) {
+      if (previewWindow && lowerName.endsWith('.docx')) {
         previewWindow.document.title = doc.fileName;
         const { renderAsync } = await import('docx-preview');
         await renderAsync(response.data, previewWindow.document.body);
         return;
       }
-      if (mode === 'preview' && previewWindow && (lowerName.endsWith('.xls') || lowerName.endsWith('.xlsx'))) {
+      if (previewWindow && (lowerName.endsWith('.xls') || lowerName.endsWith('.xlsx'))) {
         const XLSX = await import('xlsx');
         const workbook = XLSX.read(await response.data.arrayBuffer(), { type: 'array' });
         const tabs = workbook.SheetNames.map((name) => `<h2>${name.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] || char))}</h2>${XLSX.utils.sheet_to_html(workbook.Sheets[name])}`).join('');
@@ -93,15 +81,8 @@ const DocumentList: React.FC<DocumentListProps> = ({ projectId, userRoles = [], 
         return;
       }
       const blobUrl = URL.createObjectURL(response.data);
-      if (mode === 'preview') {
-        if (previewWindow) previewWindow.location.href = blobUrl;
-        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-      } else {
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = getResponseFileName(response, doc.fileName);
-        document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(blobUrl);
-      }
+      if (previewWindow) previewWindow.location.href = blobUrl;
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
     } catch (error: any) {
       previewWindow?.close();
       toast.error(error.response?.status === 403 ? '无权访问该文件' : '文件打开失败');
@@ -147,7 +128,7 @@ const DocumentList: React.FC<DocumentListProps> = ({ projectId, userRoles = [], 
   const renderDocument = (doc: Document) => (
     <div key={doc.id} className="flex flex-col gap-3 rounded-md border border-slate-600 bg-slate-900/60 p-3 md:flex-row md:items-center md:justify-between">
       <div className="flex items-start gap-3 min-w-0"><FileText className="w-5 h-5 text-blue-400 mt-0.5 shrink-0" /><div className="min-w-0"><div className="text-slate-100 font-medium truncate">{doc.fileName}</div><div className="text-xs text-slate-400 mt-1 flex flex-wrap gap-x-3 gap-y-1"><span>上传时间: {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString('zh-CN') : '-'}</span><span>槽位编码: {doc.deliverableSlotCode}</span></div></div></div>
-      <div className="flex items-center gap-2 shrink-0">{getStatusBadge(doc.complianceStatus, doc.isLocked)}{isPreviewable(doc.fileName) && <Button size="sm" variant="outline" onClick={() => openFile(doc, 'preview')} title="预览文件" className="bg-slate-700 text-slate-100 border-slate-600"><Eye className="w-4 h-4" /></Button>}<Button size="sm" variant="outline" onClick={() => openFile(doc, 'download')} title="下载文件" className="bg-slate-700 text-slate-100 border-slate-600"><Download className="w-4 h-4" /></Button>{canDelete && <Button size="sm" variant="outline" onClick={() => deleteDocument(doc)} title="删除文件" className="border-red-800 text-red-400 hover:bg-red-900/30"><Trash2 className="w-4 h-4" /></Button>}</div>
+      <div className="flex items-center gap-2 shrink-0">{getStatusBadge(doc.complianceStatus, doc.isLocked)}{isPreviewable(doc.fileName) && <Button size="sm" variant="outline" onClick={() => openFile(doc)} title="预览文件" className="bg-slate-700 text-slate-100 border-slate-600"><Eye className="w-4 h-4" /></Button>}{canDelete && <Button size="sm" variant="outline" onClick={() => deleteDocument(doc)} title="删除文件" className="border-red-800 text-red-400 hover:bg-red-900/30"><Trash2 className="w-4 h-4" /></Button>}</div>
     </div>
   );
 
